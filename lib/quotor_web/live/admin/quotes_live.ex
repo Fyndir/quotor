@@ -1,0 +1,183 @@
+defmodule QuotorWeb.Admin.QuotesLive do
+  @moduledoc "Modération des quotes : correction du texte, masquage."
+  use QuotorWeb, :live_view
+
+  alias Quotor.{Catalog, Media, Text}
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <Layouts.admin flash={@flash} current_scope={@current_scope} active={:quotes}>
+      <h1 class="text-2xl font-black mb-4">Quotes</h1>
+
+      <.form
+        for={@filter}
+        id="quote-filter"
+        phx-change="filter"
+        phx-submit="filter"
+        class="mb-4 flex gap-2"
+      >
+        <input
+          type="search"
+          name="search"
+          value={@filter[:search].value}
+          placeholder="Filtrer par texte…"
+          phx-debounce="300"
+          class="input input-sm flex-1"
+        />
+        <input :if={@source_id} type="hidden" name="source_id" value={@source_id} />
+        <.link :if={@source_id} patch={~p"/admin/quotes"} class="btn btn-sm btn-ghost">
+          Source n° {@source_id} <.icon name="hero-x-mark" class="size-4" />
+        </.link>
+      </.form>
+
+      <div class="overflow-x-auto rounded-2xl bg-base-200">
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Texte</th>
+              <th>Source</th>
+              <th>Statut</th>
+              <th>Vues</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              :for={quote <- @quotes}
+              id={"admin-quote-#{quote.id}"}
+              class={[!quote.enabled && "opacity-50"]}
+            >
+              <td class="w-28">
+                <img
+                  :if={quote.thumb_path}
+                  src={Media.url(quote.thumb_path)}
+                  class="w-24 rounded aspect-video object-cover"
+                  alt=""
+                  loading="lazy"
+                />
+              </td>
+              <td class="max-w-md">
+                <%= if @editing == quote.id do %>
+                  <.form
+                    for={@edit_form}
+                    id={"edit-quote-#{quote.id}"}
+                    phx-submit="save_text"
+                    class="flex gap-2"
+                  >
+                    <input type="hidden" name="quote_id" value={quote.id} />
+                    <input
+                      type="text"
+                      name="text"
+                      value={@edit_form[:text].value}
+                      class="input input-sm flex-1"
+                    />
+                    <button class="btn btn-sm btn-primary">OK</button>
+                    <button type="button" phx-click="cancel_edit" class="btn btn-sm btn-ghost">Annuler</button>
+                  </.form>
+                <% else %>
+                  <.link navigate={~p"/q/#{quote.id}"} class="hover:underline">{quote.text}</.link>
+                  <div class="text-xs text-base-content/50">
+                    {Text.format_ms(quote.start_ms)} – {Text.format_ms(quote.end_ms)}
+                  </div>
+                <% end %>
+              </td>
+              <td class="text-xs max-w-48 truncate">{quote.source.title}</td>
+              <td><.status_badge status={quote.status} /></td>
+              <td>{quote.views_count}</td>
+              <td class="text-right whitespace-nowrap">
+                <button
+                  type="button"
+                  phx-click="edit"
+                  phx-value-id={quote.id}
+                  class="btn btn-xs btn-ghost"
+                  title="Corriger le texte"
+                >
+                  <.icon name="hero-pencil" class="size-4" />
+                </button>
+                <button
+                  type="button"
+                  phx-click="toggle"
+                  phx-value-id={quote.id}
+                  class="btn btn-xs btn-ghost"
+                  title={if quote.enabled, do: "Masquer", else: "Afficher"}
+                >
+                  <.icon
+                    name={if quote.enabled, do: "hero-eye-slash", else: "hero-eye"}
+                    class="size-4"
+                  />
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p :if={@quotes == []} class="p-6 text-center text-base-content/60">Aucune quote.</p>
+      </div>
+    </Layouts.admin>
+    """
+  end
+
+  @impl true
+  def mount(_params, _session, socket) do
+    {:ok, assign(socket, page_title: "Quotes", editing: nil, edit_form: to_form(%{"text" => ""}))}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    source_id =
+      case Integer.parse(params["source_id"] || "") do
+        {id, ""} -> id
+        _ -> nil
+      end
+
+    search = params["search"] || ""
+
+    {:noreply,
+     socket
+     |> assign(source_id: source_id, filter: to_form(%{"search" => search}))
+     |> load()}
+  end
+
+  @impl true
+  def handle_event("filter", params, socket) do
+    query =
+      Map.take(params, ["search", "source_id"])
+      |> Enum.reject(fn {_, v} -> v in [nil, ""] end)
+      |> Map.new()
+
+    {:noreply, push_patch(socket, to: ~p"/admin/quotes?#{query}")}
+  end
+
+  def handle_event("edit", %{"id" => id}, socket) do
+    quote = Enum.find(socket.assigns.quotes, &(&1.id == String.to_integer(id)))
+    {:noreply, assign(socket, editing: quote.id, edit_form: to_form(%{"text" => quote.text}))}
+  end
+
+  def handle_event("cancel_edit", _, socket), do: {:noreply, assign(socket, editing: nil)}
+
+  def handle_event("save_text", %{"quote_id" => id, "text" => text}, socket) do
+    quote = Catalog.get_quote!(id)
+
+    case Catalog.update_quote(quote, %{text: text}) do
+      {:ok, _} -> {:noreply, socket |> assign(editing: nil) |> load()}
+      {:error, _} -> {:noreply, put_flash(socket, :error, "Texte invalide.")}
+    end
+  end
+
+  def handle_event("toggle", %{"id" => id}, socket) do
+    quote = Catalog.get_quote!(id)
+    {:ok, _} = Catalog.update_quote(quote, %{enabled: !quote.enabled})
+    {:noreply, load(socket)}
+  end
+
+  defp load(socket) do
+    assign(socket,
+      quotes:
+        Catalog.list_admin_quotes(
+          search: socket.assigns.filter[:search].value,
+          source_id: socket.assigns.source_id
+        )
+    )
+  end
+end

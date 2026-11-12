@@ -1,0 +1,41 @@
+# Blueprint Render : https://render.com/docs/blueprint-spec
+# La base de données est hébergée sur Neon : renseigner DATABASE_URL dans le
+# dashboard Render (chaîne de connexion Neon, de préférence l'hôte direct,
+# sans "-pooler", avec ?sslmode=require).
+services:
+  - type: web
+    name: quotor
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY_BASE
+        generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: POOL_SIZE
+        value: "5"
+      - key: LEGAL_EDITOR_NAME
+        sync: false
+      - key: LEGAL_EDITOR_ADDRESS
+        sync: false
+      - key: LEGAL_CONTACT_EMAIL
+        sync: false
+      - key: LEGAL_PUBLICATION_DIRECTOR
+        sync: false
+      # Facultatif : cookies YouTube (fichier secret Render) si YouTube bloque l'IP
+      # - key: YTDLP_COOKIES
+      #   value: /etc/secrets/cookies.txt
+    # Disque persistant pour les clips (sinon perdus à chaque redéploiement).
+    # Nécessite une offre payante ; supprimer ce bloc pour l'offre gratuite.
+    disk:
+      name: quotor-data
+      mountPath: /data
+      sizeGB: 10

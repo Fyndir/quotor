@@ -1,0 +1,16 @@
+.git
+.github
+.elixir_ls
+_build
+deps
+test
+cover
+doc
+priv/media
+priv/static/assets
+priv/static/cache_manifest.json
+assets/node_modules
+docker-compose*.yml
+Dockerfile.dev
+*.ez
+erl_crash.dump

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <meta
+      name="description"
+      content={
+        (assigns[:og] && assigns[:og].description) ||
+          "Quotor : retrouvez et assemblez des répliques cultes de vidéastes français, en vidéo et avec le son."
+      }
+    />
+    <%!-- Couleur de la barre latérale des embeds Discord --%>
+    <meta name="theme-color" content="#f5d000" />
+    <meta property="og:site_name" content="Quotor" />
+    <%= if og = assigns[:og] do %>
+      <meta property="og:type" content={og.type} />
+      <meta property="og:title" content={og.title} />
+      <meta property="og:description" content={og.description} />
+      <meta property="og:url" content={og.url} />
+      <meta :if={og.image} property="og:image" content={og.image} />
+      <%= if og.video do %>
+        <meta property="og:video" content={og.video} />
+        <meta property="og:video:url" content={og.video} />
+        <meta property="og:video:secure_url" content={og.video} />
+        <meta property="og:video:type" content="video/mp4" />
+        <meta property="og:video:width" content={og.width} />
+        <meta property="og:video:height" content={og.height} />
+      <% end %>
+    <% else %>
+      <meta property="og:type" content="website" />
+      <meta property="og:title" content="Quotor" />
+      <meta
+        property="og:description"
+        content="Des extraits vidéo, avec le son, des vidéastes français."
+      />
+    <% end %>
+    <.live_title default="Quotor" suffix=" · Quotor" phx-no-format>{assigns[:page_title]}</.live_title>
+    <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
+    <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
+    </script>
+    <script>
+      (() => {
+        const systemTheme = () => matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+
+        const setTheme = (theme) => {
+          if (theme === "system") {
+            localStorage.removeItem("phx:theme");
+            document.documentElement.setAttribute("data-theme", systemTheme());
+            document.documentElement.setAttribute("data-theme-source", "system");
+          } else {
+            localStorage.setItem("phx:theme", theme);
+            document.documentElement.setAttribute("data-theme", theme);
+            document.documentElement.setAttribute("data-theme-source", "user");
+          }
+        };
+        if (!document.documentElement.hasAttribute("data-theme")) {
+          setTheme(localStorage.getItem("phx:theme") || "system");
+        }
+        window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
+        window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
+
+        matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+          if (document.documentElement.getAttribute("data-theme-source") === "system") {
+            document.documentElement.setAttribute("data-theme", systemTheme());
+          }
+        });
+      })();
+    </script>
+  </head>
+  <body class="bg-base-100 text-base-content antialiased">
+    {@inner_content}
+  </body>
+</html>

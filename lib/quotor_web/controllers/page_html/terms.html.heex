@@ -1,0 +1,103 @@
+<Layouts.app flash={@flash} current_scope={@current_scope}>
+  <article class="prose-quotor mx-auto max-w-3xl">
+    <h1>Conditions d'utilisation &amp; droit d'auteur</h1>
+    <p class="lead">
+      En utilisant Quotor, vous acceptez les présentes conditions. Dernière mise à jour : {Calendar.strftime(
+        ~D[2026-11-12],
+        "%d/%m/%Y"
+      )}.
+    </p>
+
+    <h2>1. Objet du service</h2>
+    <p>
+      Quotor est un moteur de recherche d'extraits vidéo courts avec leur son (« quotes ») et un
+      outil de montage permettant d'assembler plusieurs extraits pour leur « faire dire » une
+      phrase. Le service a une vocation exclusivement <strong>humoristique et parodique</strong>.
+      Il est gratuit et sans publicité.
+    </p>
+
+    <h2>2. Origine et statut des extraits</h2>
+    <ul>
+      <li>
+        Les extraits sont issus de vidéos publiées par des tiers (notamment des vidéastes
+        francophones). Leurs auteurs et ayants droit en conservent l'intégralité des droits
+        patrimoniaux et moraux.
+      </li>
+      <li>
+        Quotor ne revendique aucun droit sur ces œuvres et n'est affilié à aucun de leurs auteurs.
+        La présence d'un extrait n'implique aucun partenariat ni approbation de leur part.
+      </li>
+      <li>
+        Chaque extrait est limité à quelques secondes, crédite sa source et renvoie, lorsque c'est
+        possible, vers l'œuvre originale à l'instant précis de la citation.
+      </li>
+    </ul>
+
+    <h2>3. Exception de parodie</h2>
+    <p>
+      L'article L. 122-5, 4° du Code de la propriété intellectuelle dispose que, lorsque l'œuvre a
+      été divulguée, l'auteur ne peut interdire « la parodie, le pastiche et la caricature, compte
+      tenu des lois du genre ». Selon la Cour de justice de l'Union européenne (arrêt <em>Deckmyn</em>,
+      C-201/13, 3 septembre 2014), la parodie a pour caractéristiques essentielles
+      <strong>d'évoquer une œuvre existante tout en présentant des différences perceptibles</strong>
+      par rapport à celle-ci, et de constituer <strong>une manifestation d'humour ou une raillerie</strong>,
+      dans le respect d'un juste équilibre avec les intérêts des auteurs.
+    </p>
+    <p>En conséquence, vous vous engagez à :</p>
+    <ul>
+      <li>
+        utiliser les extraits et montages uniquement dans un but humoristique, parodique ou
+        caricatural, sans risque de confusion avec l'œuvre originale ;
+      </li>
+      <li>
+        ne pas en faire d'usage commercial (publicité, revente, monétisation, entraînement de modèles,
+        etc.) ;
+      </li>
+      <li>
+        ne pas porter atteinte à l'honneur ou à la réputation des auteurs et des personnes
+        apparaissant dans les extraits (droit moral, article L. 121-1 CPI ; droit à l'image), ni
+        produire de contenu haineux, diffamatoire, discriminatoire, harcelant ou trompeur
+        (notamment faire croire qu'une personne a réellement tenu des propos qu'elle n'a pas tenus) ;
+      </li>
+      <li>
+        ne pas extraire massivement le catalogue (aspiration, téléchargement automatisé).
+      </li>
+    </ul>
+    <p>
+      Vous êtes seul responsable des montages que vous créez et de leur diffusion. L'exception de
+      parodie s'apprécie au cas par cas : en cas de doute, abstenez-vous.
+    </p>
+
+    <h2>4. Ayants droit : demande de retrait</h2>
+    <p>
+      Si vous êtes titulaire de droits sur un contenu présent sur Quotor et souhaitez son retrait,
+      utilisez le <.link navigate={~p"/signaler"}>formulaire de signalement</.link>
+      en indiquant le lien de l'extrait (ou de la vidéo concernée), votre identité et votre
+      qualité. Nous pouvons retirer un extrait isolé ou <strong>l'ensemble des extraits issus d'une
+        vidéo ou d'une chaîne</strong>, et ne plus l'utiliser à l'avenir.
+    </p>
+
+    <h2>5. Comptes</h2>
+    <p>
+      La recherche et les montages sont accessibles sans compte. Un compte permet de conserver ses
+      favoris et ses montages. L'éditeur peut suspendre un compte en cas de manquement aux présentes
+      conditions. Vous pouvez demander la suppression de votre compte à tout moment via l'adresse
+      de contact <a href={"mailto:#{@legal[:contact_email]}"}>{@legal[:contact_email]}</a>.
+    </p>
+
+    <h2>6. Responsabilité</h2>
+    <p>
+      Pour les contenus générés par les utilisateurs (montages), Quotor agit en qualité d'hébergeur
+      au sens de l'article 6 du règlement (UE) 2022/2065 et de la LCEN : sa responsabilité ne peut
+      être engagée que s'il n'agit pas promptement après avoir eu connaissance d'un contenu
+      manifestement illicite. Le service est fourni « en l'état », sans garantie de disponibilité.
+    </p>
+
+    <h2>7. Droit applicable</h2>
+    <p>
+      Les présentes conditions sont soumises au droit français. Voir aussi les <.link navigate={
+        ~p"/mentions-legales"
+      }>mentions légales</.link>.
+    </p>
+  </article>
+</Layouts.app>

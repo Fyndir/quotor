@@ -1,0 +1,110 @@
+<Layouts.app flash={@flash} current_scope={@current_scope}>
+  <article class="prose-quotor mx-auto max-w-3xl">
+    <h1>Mentions légales</h1>
+    <p class="lead">
+      Conformément à l'article 6 de la loi n° 2004-575 du 21 juin 2004 pour la confiance dans
+      l'économie numérique (LCEN).
+    </p>
+
+    <h2>Éditeur du site</h2>
+    <p>
+      Le site Quotor est édité par <strong>{@legal[:editor_name]}</strong>
+      <br /> Adresse : {@legal[:editor_address]}
+      <br /> Contact : <a href={"mailto:#{@legal[:contact_email]}"}>{@legal[:contact_email]}</a>
+    </p>
+    <p>
+      Directeur de la publication : <strong>{@legal[:publication_director]}</strong>
+    </p>
+    <p class="note">
+      Si l'éditeur agit à titre non professionnel, il peut, conformément à l'article 6, III, 2 de
+      la LCEN, ne tenir à la disposition du public que les coordonnées de l'hébergeur, sous
+      réserve de lui avoir communiqué ses éléments d'identification personnelle.
+    </p>
+
+    <h2>Hébergement</h2>
+    <p>
+      <strong>Application :</strong>
+      Render Services, Inc. — 525 Brannan Street, Suite 300, San Francisco, CA 94107, États-Unis —
+      <a href="https://render.com" rel="noopener" target="_blank">render.com</a>
+    </p>
+    <p>
+      <strong>Base de données :</strong>
+      Neon, Inc. — <a href="https://neon.tech" rel="noopener" target="_blank">neon.tech</a>
+    </p>
+
+    <h2>Propriété intellectuelle</h2>
+    <p>
+      Les extraits vidéo et sonores présentés sur Quotor proviennent d'œuvres de tiers (vidéastes,
+      producteurs, diffuseurs). <strong>Ils restent la propriété exclusive de leurs auteurs et
+        ayants droit respectifs</strong>, que Quotor ne prétend en aucun cas représenter. Chaque
+      extrait mentionne sa source et renvoie vers l'œuvre originale.
+    </p>
+    <p>
+      Ces extraits, volontairement très courts, sont mis à disposition dans le seul but de permettre
+      la création de contenus humoristiques relevant de l'exception de
+      <strong>parodie, pastiche et caricature</strong>
+      prévue à l'article L. 122-5, 4° du Code de la propriété intellectuelle, et à l'article 5.3.k
+      de la directive 2001/29/CE. Le détail figure dans les <.link navigate={~p"/conditions"}>conditions d'utilisation</.link>.
+    </p>
+    <p>
+      La marque, le logo et le code de Quotor sont la propriété de son éditeur. © {Date.utc_today().year} Quotor.
+    </p>
+
+    <h2>Signalement et retrait de contenu</h2>
+    <p>
+      Tout ayant droit ou toute personne estimant qu'un contenu porte atteinte à ses droits peut
+      demander son retrait via le
+      <.link navigate={~p"/signaler"}>formulaire de signalement</.link>
+      (présent également sous chaque extrait) ou par email à <a href={"mailto:#{@legal[:contact_email]}"}>{@legal[:contact_email]}</a>. Conformément à
+      l'article 16 du règlement (UE) 2022/2065 sur les services numériques (DSA), la notification
+      doit comporter : l'identification du contenu (lien), l'exposé des motifs, vos nom et
+      coordonnées, et une déclaration de bonne foi. Les demandes fondées sont traitées
+      promptement ; le contenu est désactivé dans l'attente de leur examen lorsque cela paraît
+      nécessaire.
+    </p>
+
+    <h2>Données personnelles</h2>
+    <p>
+      Responsable du traitement : l'éditeur (coordonnées ci-dessus). Données traitées :
+    </p>
+    <ul>
+      <li>
+        <strong>Compte utilisateur</strong>
+        (facultatif) : adresse email, mot de passe chiffré (bcrypt), favoris et montages — base
+        légale : exécution du service ; conservées jusqu'à la suppression du compte.
+      </li>
+      <li>
+        <strong>Signalements</strong>
+        : nom, email et message fournis — base légale : obligation légale (traitement des
+        notifications) ; conservés 3 ans.
+      </li>
+      <li>
+        <strong>Journaux techniques</strong>
+        : nécessaires à la sécurité et au bon fonctionnement — base légale : intérêt légitime ;
+        durée limitée à celle de l'hébergeur.
+      </li>
+    </ul>
+    <p>
+      Les hébergeurs étant établis aux États-Unis, des transferts de données hors de l'Union
+      européenne peuvent avoir lieu, encadrés par les clauses contractuelles types de la Commission
+      européenne et/ou le Data Privacy Framework.
+    </p>
+    <p>
+      Vous disposez d'un droit d'accès, de rectification, d'effacement, de limitation, de portabilité
+      et d'opposition (articles 15 à 21 du RGPD), à exercer à l'adresse de contact ci-dessus, ainsi
+      que du droit d'introduire une réclamation auprès de la <a
+        href="https://www.cnil.fr"
+        rel="noopener"
+        target="_blank"
+      >CNIL</a>.
+    </p>
+
+    <h2>Cookies</h2>
+    <p>
+      Quotor n'utilise <strong>aucun cookie publicitaire ni de mesure d'audience</strong>. Seuls
+      des cookies strictement nécessaires sont déposés (session, « se souvenir de moi »,
+      protection CSRF), ainsi que votre préférence de thème dans le stockage local du navigateur.
+      Ils sont exemptés de consentement (article 82 de la loi Informatique et Libertés).
+    </p>
+  </article>
+</Layouts.app>
