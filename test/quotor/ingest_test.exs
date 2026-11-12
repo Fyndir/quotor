@@ -29,6 +29,13 @@ defmodule Quotor.IngestTest do
     assert source.status == "cutting"
     assert source.title == "Vidéo de test"
     assert source.quotes_count == 2
+
+    # la vidéo est rattachée automatiquement à sa chaîne YouTube
+    assert source.channel_url == "https://www.youtube.com/@chainetest"
+    author = Catalog.get_author!(source.author_id)
+    assert author.name == "Chaîne test"
+    assert author.kind == "channel"
+    assert author.url == "https://www.youtube.com/@chainetest"
     assert_enqueued(worker: CutSource, args: %{source_id: source.id})
 
     assert :ok = perform_job(CutSource, %{source_id: source.id})

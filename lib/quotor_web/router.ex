@@ -35,6 +35,9 @@ defmodule QuotorWeb.Router do
 
     live_session :public, on_mount: [{QuotorWeb.UserAuth, :mount_current_scope}] do
       live "/", HomeLive, :index
+      live "/decouvrir", DiscoverLive, :index
+      live "/auteurs", AuthorsLive, :index
+      live "/auteurs/:slug", AuthorLive, :show
       live "/q/:id", QuoteLive, :show
       live "/m/:key", MontageLive, :show
       live "/signaler", ReportLive, :new
@@ -66,6 +69,7 @@ defmodule QuotorWeb.Router do
       live "/", DashboardLive, :index
       live "/sources", SourcesLive, :index
       live "/chaines", ChannelsLive, :index
+      live "/auteurs", AuthorsLive, :index
       live "/quotes", QuotesLive, :index
       live "/signalements", ReportsLive, :index
       live "/utilisateurs", UsersLive, :index

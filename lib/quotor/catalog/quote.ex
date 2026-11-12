@@ -23,6 +23,7 @@ defmodule Quotor.Catalog.Quote do
     field :views_count, :integer, default: 0
 
     belongs_to :source, Quotor.Catalog.Source
+    belongs_to :author, Quotor.Catalog.Author
     has_many :words, Quotor.Catalog.QuoteWord, preload_order: [asc: :position]
 
     timestamps(type: :utc_datetime)
@@ -31,7 +32,7 @@ defmodule Quotor.Catalog.Quote do
   @doc "Modification par un admin (correction du texte, activation)."
   def changeset(quote, attrs) do
     quote
-    |> cast(attrs, [:text, :enabled])
+    |> cast(attrs, [:text, :enabled, :author_id])
     |> validate_required([:text])
     |> put_norm()
   end

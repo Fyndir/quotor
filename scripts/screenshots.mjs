@@ -38,6 +38,9 @@ const ctx = await browser.newContext({
 const page = await ctx.newPage();
 
 await shot(page, "/", "accueil");
+await shot(page, "/decouvrir", "decouvrir");
+await shot(page, "/auteurs", "auteurs");
+await shot(page, "/auteurs/alex-testeur", "auteur");
 await shot(page, "/?q=jeu", "recherche");
 // Le montage est rendu en mode avancé, puis capturé sur sa page de partage
 await page.goto(BASE + "/?" + new URLSearchParams({ q: MONTAGE_QUERY, mode: "advanced" }));
@@ -65,6 +68,7 @@ await Promise.all([
 
 await shot(page, "/admin", "admin-supervision", { full: true });
 await shot(page, "/admin/sources", "admin-sources");
+await shot(page, "/admin/auteurs", "admin-auteurs");
 await shot(page, "/admin/signalements", "admin-signalements");
 await shot(page, "/admin/logs", "admin-logs");
 await ctx.close();

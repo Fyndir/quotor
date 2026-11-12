@@ -44,8 +44,15 @@ defmodule QuotorWeb.Admin.SourcesLive do
           </p>
           <.form for={@upload_form} id="upload-form" phx-submit="upload" phx-change="validate_upload">
             <.input field={@upload_form[:title]} type="text" label="Titre" required />
-            <.input field={@upload_form[:uploader]} type="text" label="Auteur / chaîne" />
+            <.input field={@upload_form[:uploader]} type="text" label="Chaîne" />
             <.input field={@upload_form[:url]} type="url" label="Lien de l'original (attribution)" />
+            <.input
+              field={@upload_form[:author_id]}
+              type="select"
+              label="Auteur (qui parle)"
+              options={@author_options}
+              prompt="— la chaîne ci-dessus —"
+            />
             <div class="grid gap-3 sm:grid-cols-2 my-3 text-sm">
               <label class="block">
                 <span class="block mb-1">Vidéo</span>
@@ -88,6 +95,7 @@ defmodule QuotorWeb.Admin.SourcesLive do
           <thead>
             <tr>
               <th>Vidéo</th>
+              <th>Auteur</th>
               <th>Statut</th>
               <th>Quotes</th>
               <th>Durée</th>
@@ -107,6 +115,25 @@ defmodule QuotorWeb.Admin.SourcesLive do
                   <span :if={!source.url}>{source.origin}</span>
                 </div>
                 <div :if={source.error} class="text-xs text-error mt-1">{source.error}</div>
+              </td>
+              <td>
+                <form id={"source-author-#{source.id}"} phx-change="set_author">
+                  <input type="hidden" name="source_id" value={source.id} />
+                  <select
+                    name="author_id"
+                    class="select select-xs w-40"
+                    aria-label="Auteur de la vidéo"
+                  >
+                    <option value="">—</option>
+                    <option
+                      :for={{name, id} <- @author_options}
+                      value={id}
+                      selected={source.author_id == id}
+                    >
+                      {name}
+                    </option>
+                  </select>
+                </form>
               </td>
               <td>
                 <.status_badge status={source.status} />
@@ -171,7 +198,8 @@ defmodule QuotorWeb.Admin.SourcesLive do
      |> assign(
        page_title: "Vidéos sources",
        url_form: to_form(%{"urls" => ""}),
-       upload_form: to_form(%{"title" => "", "uploader" => "", "url" => ""})
+       upload_form: to_form(%{"title" => "", "uploader" => "", "url" => "", "author_id" => ""}),
+       author_options: author_options()
      )
      |> allow_upload(:video,
        accept: ~w(.mp4 .mkv .webm .mov),
@@ -229,7 +257,8 @@ defmodule QuotorWeb.Admin.SourcesLive do
   end
 
   def handle_event("validate_upload", params, socket) do
-    {:noreply, assign(socket, upload_form: to_form(Map.take(params, ~w(title uploader url))))}
+    {:noreply,
+     assign(socket, upload_form: to_form(Map.take(params, ~w(title uploader url author_id))))}
   end
 
   def handle_event("upload", params, socket) do
@@ -249,7 +278,7 @@ defmodule QuotorWeb.Admin.SourcesLive do
         {:noreply, put_flash(socket, :error, "Choisis un fichier vidéo.")}
 
       true ->
-        attrs = Map.take(params, ~w(title uploader url))
+        attrs = Map.take(params, ~w(title uploader url author_id))
 
         case Ingest.submit_upload(attrs, video, subtitles, socket.assigns.current_scope) do
           {:ok, _source} ->
@@ -270,6 +299,13 @@ defmodule QuotorWeb.Admin.SourcesLive do
   def handle_event("retry", %{"id" => id}, socket) do
     {:ok, _} = id |> Catalog.get_source!() |> Ingest.retry()
     {:noreply, socket |> put_flash(:info, "Traitement relancé.") |> refresh()}
+  end
+
+  def handle_event("set_author", %{"source_id" => id, "author_id" => author_id}, socket) do
+    source = Catalog.get_source!(id)
+    {:ok, _} = Catalog.update_source(source, %{author_id: blank_to_nil(author_id)})
+    Logger.info("admin : auteur de la source #{id} → #{author_id}")
+    {:noreply, socket |> put_flash(:info, "Auteur de la vidéo mis à jour.") |> refresh()}
   end
 
   def handle_event("toggle", %{"id" => id}, socket) do
@@ -304,6 +340,11 @@ defmodule QuotorWeb.Admin.SourcesLive do
     File.cp!(path, dest)
     {:ok, dest}
   end
+
+  defp author_options, do: Enum.map(Catalog.list_authors(), &{&1.name, &1.id})
+
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(v), do: v
 
   defp upload_error(:too_large), do: "Fichier trop volumineux"
   defp upload_error(:not_accepted), do: "Format non accepté"

@@ -11,6 +11,9 @@ compris), et on peut assembler plusieurs extraits pour composer une phrase qui n
 
 **Stack** : Elixir 1.19 · Phoenix 1.8 (LiveView) · PostgreSQL · Oban · ffmpeg · yt-dlp · Docker.
 
+**Auteur** : concept, design et code © 2026 **Antoine Gamain** — tous droits réservés
+([LICENSE](LICENSE)). Voir [Auteur et propriété](#auteur-et-propriété).
+
 > Les captures ci-dessous utilisent les **données de démonstration** (`priv/repo/demo.exs`) : des
 > vidéos « cartons » générées par ffmpeg avec des répliques originales, aucun contenu tiers.
 
@@ -25,11 +28,18 @@ compris), et on peut assembler plusieurs extraits pour composer une phrase qui n
 - [Architecture](#architecture)
 - [Tests et CI](#tests-et-ci)
 - [Limites connues](#limites-connues)
-- [Droit d'auteur](#droit-dauteur)
+- [Droit d'auteur des contenus](#droit-dauteur-des-contenus)
+- [Auteur et propriété](#auteur-et-propriété)
 
 ---
 
 ## Fonctionnalités
+
+### Accueil : la recherche, et rien d'autre
+
+La page d'accueil est volontairement dépouillée : un champ de recherche, le choix du mode
+(standard ou montage) et un lien vers l'onglet **Découvrir** pour qui n'a pas d'idée. Aucun extrait
+n'est chargé tant qu'on n'a rien cherché.
 
 ### Recherche standard
 
@@ -38,6 +48,20 @@ les accents et la ponctuation, tolère les fautes de frappe, et classe l'express
 premier. Cliquer sur une carte lit l'extrait **avec le son**.
 
 ![Résultats de recherche](docs/screenshots/recherche.png)
+
+### Onglet Découvrir
+
+Accessible à tous depuis l'en-tête (`/decouvrir`), il permet de parcourir le catalogue sans
+chercher, selon trois tris :
+
+- **Au hasard**, avec un bouton « Mélanger » ;
+- **Nouveautés** ;
+- **Populaires**, d'après le nombre de vues.
+
+Les nouveautés et les populaires se chargent 24 par 24 (« Voir plus »). Les utilisateurs connectés
+peuvent y mettre des extraits en favori.
+
+![Onglet Découvrir](docs/screenshots/decouvrir.png)
 
 ### Mode avancé : le montage
 
@@ -51,17 +75,39 @@ partageable.
 
 ### Page d'un extrait et partage
 
-Chaque extrait crédite sa source et renvoie vers **l'original à l'instant exact**. Les liens
+Chaque extrait indique **qui parle**, la **chaîne** qui a publié la vidéo (avec un lien vers elle)
+et la **source** (titre de la vidéo, instant, date de publication), et renvoie vers **l'original à
+l'instant exact**. Les liens
 `/q/…` et `/m/…` contiennent des balises Open Graph : collés dans **Discord**, ils s'affichent avec
 un lecteur vidéo. Un second bouton copie le lien direct du `.mp4`.
 
 ![Page d'un extrait](docs/screenshots/extrait.png)
 
+### Auteurs
+
+Chaque réplique est attribuée à un **auteur** : la **personne** qui parle ou, à défaut, la
+**chaîne** YouTube qui a publié la vidéo.
+
+- **Attribution automatique** : à l'ingestion, chaque vidéo est rattachée à sa chaîne, créée comme
+  auteur de type « chaîne » avec son lien.
+- **Deux niveaux d'attribution** : l'admin peut désigner l'auteur d'une **vidéo entière**
+  (« toute cette vidéo est dite par X »), ou d'une **réplique précise**, ce qui est prioritaire.
+- **Partout dans l'interface** : l'auteur apparaît sur chaque carte et sur la page de l'extrait,
+  ainsi que dans le titre de l'aperçu Discord.
+- **Pages publiques** : `/auteurs` liste les auteurs avec leur nombre de répliques, et chaque
+  auteur a sa page (`/auteurs/<nom>`) avec ses répliques, les plus vues d'abord.
+- **Recherche** : taper le nom d'un auteur propose un lien direct vers sa page.
+
+<p>
+  <img src="docs/screenshots/auteurs.png" alt="Liste des auteurs" width="49%" />
+  <img src="docs/screenshots/auteur.png" alt="Page d'un auteur" width="49%" />
+</p>
+
 ### Trois profils
 
 | Profil          | Ce qu'il peut faire                                                                  |
 | --------------- | ------------------------------------------------------------------------------------ |
-| **Anonyme**     | recherche, montages, pages d'extraits et de montages, partage, signalement           |
+| **Anonyme**     | recherche, onglet Découvrir, pages auteurs, montages, pages d'extraits et de montages, partage, signalement |
 | **Utilisateur** | en plus : **favoris**, historique « **Mes montages** », paramètres du compte         |
 | **Admin**       | en plus : back-office `/admin` (voir ci-dessous), Oban Web, Phoenix LiveDashboard     |
 
@@ -87,6 +133,12 @@ défaut) sont synchronisées chaque nuit.
 
 ![Vidéos sources](docs/screenshots/admin-sources.png)
 
+**Auteurs** : l'admin crée et modifie les auteurs (nom, type personne ou chaîne, lien,
+description), puis les attribue à une vidéo depuis « Vidéos sources » (colonne *Auteur*, ou à
+l'envoi d'un fichier), ou à une réplique précise depuis « Quotes ».
+
+![Gestion des auteurs](docs/screenshots/admin-auteurs.png)
+
 **Signalements** : les demandes de retrait (formulaire public `/signaler`, présent sous chaque
 extrait) se traitent en un clic : masquer l'extrait, masquer toute la vidéo, marquer traité, rejeter.
 Les pages **Quotes** (corriger un texte, masquer) et **Utilisateurs** (promouvoir admin, bannir)
@@ -101,8 +153,9 @@ Les logs complets partent sur la sortie standard (Docker / Render).
 
 ### Pages légales
 
-Mentions légales (LCEN, hébergeurs, RGPD, cookies), conditions d'utilisation (exception de parodie,
-droit moral, procédure de retrait) et copyright en pied de page.
+Mentions légales (propriété de l'application, LCEN, hébergeurs, RGPD, cookies), conditions
+d'utilisation (exception de parodie, droit moral, procédure de retrait, propriété de Quotor) et, en
+pied de page, le copyright de l'application et la mention sur les extraits.
 
 ![Mentions légales](docs/screenshots/mentions-legales.png)
 
@@ -251,6 +304,7 @@ Admin : URL YouTube / fichier          Cron 04:00 UTC : chaînes suivies activé
 
 | Dossier | Contenu |
 | --- | --- |
+| `lib/quotor/catalog/` | schémas : sources, quotes, mots horodatés, auteurs, favoris, signalements |
 | `lib/quotor/ingest/` | téléchargement (yt-dlp), analyse des sous-titres, segmentation |
 | `lib/quotor/search.ex` | recherche standard et plan de montage |
 | `lib/quotor/montages.ex` | rendu et cache des montages |
@@ -266,13 +320,16 @@ Les fichiers médias sont servis par `/media/…` avec prise en charge des requ�
 
 ## Tests et CI
 
-171 tests couvrent :
+191 tests couvrent :
 
 - l'analyse des sous-titres (y compris le format mot à mot de YouTube) et la segmentation ;
 - la recherche et le plan de montage ;
 - le catalogue ;
 - le **pipeline complet** d'ingestion, avec un faux téléchargeur et une vraie découpe ffmpeg ;
-- le contrôle d'accès des trois profils ;
+- les auteurs (attribution automatique à la chaîne, priorité de l'auteur d'une réplique, pages
+  publiques, gestion admin) ;
+- l'accueil, l'onglet Découvrir (tris, favoris) et le contrôle d'accès des trois profils ;
+- les mentions de propriété (pied de page, mentions légales) ;
 - les pages légales et les balises Discord ;
 - le service des médias ;
 - les logs.
@@ -340,7 +397,7 @@ du fichier).
 
 ---
 
-## Droit d'auteur
+## Droit d'auteur des contenus
 
 Les extraits restent la propriété de leurs auteurs. Quotor revendique un usage relevant de
 l'exception de **parodie, pastiche et caricature** (art. L. 122-5, 4° CPI) :
@@ -353,3 +410,28 @@ Cette exception couvre surtout les **montages** humoristiques. Une base qui déc
 catalogue de créateurs n'est pas, en elle-même, une parodie. Les textes de `/mentions-legales` et
 `/conditions` sont un point de départ : **faites-les relire par un juriste** avant une ouverture au
 public, et privilégiez l'accord des créateurs concernés.
+
+---
+
+## Auteur et propriété
+
+**Quotor a été imaginé, conçu et développé par Antoine Gamain**, qui en est l'auteur et le seul
+titulaire des droits. Cela couvre le concept de l'application (moteur de recherche d'extraits vidéo
+sonores et montages à partir de ces extraits), son code source, son architecture, son interface, ses
+textes, son nom et son logo.
+
+© 2026 Antoine Gamain — **tous droits réservés**. Aucune licence d'utilisation n'est concédée : la
+consultation de ce dépôt ne vaut pas autorisation de copier, modifier, redistribuer ou exploiter tout
+ou partie du projet sans accord écrit préalable. Voir [LICENSE](LICENSE).
+
+Ces mentions figurent aussi :
+
+- dans le pied de page de toutes les pages ;
+- dans les mentions légales (section « Propriété de l'application ») ;
+- dans les conditions d'utilisation ;
+- en tête de `mix.exs` et dans la documentation du module `Quotor`.
+
+Le nom affiché est défini par `config :quotor, :owner` dans `config/config.exs`.
+
+Les composants open source utilisés (Elixir, Phoenix, PostgreSQL, FFmpeg, yt-dlp…) restent régis par
+leurs propres licences : voir [NOTICE.md](NOTICE.md).

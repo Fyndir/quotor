@@ -86,6 +86,7 @@ defmodule Quotor.Ingest do
         {:ok, source} = Catalog.update_source(source, %{status: "downloading", error: nil})
 
         with {:ok, source} <- fetch(source),
+             {:ok, source} <- ensure_author(source),
              {:ok, sub_path} <- subtitle_file(source),
              {:ok, parsed} <- Subtitles.parse_file(sub_path),
              segments when segments != [] <- Segmenter.segment(parsed) do
@@ -134,6 +135,7 @@ defmodule Quotor.Ingest do
           subtitle_path: sub_rel,
           title: meta[:title] || source.title,
           uploader: meta[:uploader],
+          channel_url: meta[:channel_url],
           duration_s: meta[:duration_s],
           published_on: meta[:published_on]
         })
@@ -142,6 +144,22 @@ defmodule Quotor.Ingest do
       File.rm_rf(workdir)
     end
   end
+
+  # Sans auteur choisi par l'admin, la vidéo est rattachée à sa chaîne YouTube
+  # (créée comme auteur de type « chaîne » si besoin).
+  defp ensure_author(%Source{author_id: nil, uploader: uploader} = source)
+       when is_binary(uploader) and uploader != "" do
+    case Catalog.find_or_create_author(%{
+           name: uploader,
+           kind: "channel",
+           url: source.channel_url
+         }) do
+      {:ok, author} -> Catalog.update_source(source, %{author_id: author.id})
+      {:error, _} -> {:ok, source}
+    end
+  end
+
+  defp ensure_author(source), do: {:ok, source}
 
   defp subtitle_file(%Source{subtitle_path: nil}), do: {:error, :no_subtitles}
 

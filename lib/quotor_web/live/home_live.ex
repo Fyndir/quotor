@@ -125,6 +125,20 @@ defmodule QuotorWeb.HomeLive do
 
       <%!-- Mode standard --%>
       <section :if={@mode == "standard" and @query != ""}>
+        <div
+          :if={@authors_found != []}
+          id="authors-found"
+          class="flex flex-wrap items-center gap-2 mb-6"
+        >
+          <span class="text-sm text-base-content/60">Auteurs :</span>
+          <.link
+            :for={author <- @authors_found}
+            navigate={~p"/auteurs/#{author.slug}"}
+            class="badge badge-lg gap-1 bg-base-200 border-base-300 hover:bg-primary hover:text-primary-content"
+          >
+            <.icon name="hero-user-micro" class="size-4" /> {author.name}
+          </.link>
+        </div>
         <h2 class="text-sm uppercase tracking-widest text-base-content/50 mb-4">
           Résultats pour « {@query} »
         </h2>
@@ -157,35 +171,14 @@ defmodule QuotorWeb.HomeLive do
         </div>
       </section>
 
-      <%!-- Découverte --%>
-      <section :if={@query == ""}>
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-sm uppercase tracking-widest text-base-content/50">À découvrir</h2>
-          <button type="button" phx-click="shuffle" class="btn btn-ghost btn-xs">
-            <.icon name="hero-arrow-path" class="size-3" /> Mélanger
-          </button>
-        </div>
-        <div
-          id="discover"
-          phx-update="stream"
-          class="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-        >
-          <div
-            id="discover-empty"
-            class="hidden only:block col-span-full rounded-2xl bg-base-200 p-10 text-center text-base-content/70"
-          >
-            Le catalogue est encore vide : les extraits arrivent en arrière-plan dès qu'un
-            administrateur ajoute des vidéos.
-          </div>
-          <.quote_card
-            :for={{dom_id, quote} <- @streams.discover}
-            id={dom_id}
-            quote={quote}
-            favorite={MapSet.member?(@favorites, quote.id)}
-            can_favorite={@can_favorite}
-          />
-        </div>
-      </section>
+      <%!-- Pas encore de recherche : renvoi vers l'onglet Découvrir --%>
+      <p :if={@query == ""} id="discover-hint" class="text-center text-sm text-base-content/60">
+        Pas d'idée ?
+        <.link navigate={~p"/decouvrir"} class="link link-primary font-semibold">
+          Parcours l'onglet Découvrir
+        </.link>
+        pour écouter des répliques au hasard.
+      </p>
     </Layouts.app>
     """
   end
@@ -205,10 +198,10 @@ defmodule QuotorWeb.HomeLive do
        montage: nil,
        montage_loading: false,
        montage_error: nil,
+       authors_found: [],
        form: to_form(%{"q" => ""})
      )
      |> stream(:quotes, [])
-     |> stream(:discover, [])
      |> QuotorWeb.LiveHelpers.assign_rate_key()}
   end
 
@@ -226,18 +219,20 @@ defmodule QuotorWeb.HomeLive do
   end
 
   defp run(%{assigns: %{query: ""}} = socket) do
-    quotes = Catalog.random_quotes(12)
-
     socket
-    |> assign_favorites(quotes)
-    |> stream(:discover, quotes, reset: true)
+    |> assign(has_more: false, montage: nil, montage_loading: false)
+    |> stream(:quotes, [], reset: true)
   end
 
   defp run(%{assigns: %{mode: "standard", query: query}} = socket) do
     quotes = Search.search(query, limit: @page_size + 1)
 
     socket
-    |> assign(offset: 0, has_more: length(quotes) > @page_size)
+    |> assign(
+      offset: 0,
+      has_more: length(quotes) > @page_size,
+      authors_found: Catalog.search_authors(query)
+    )
     |> then(fn s ->
       quotes = Enum.take(quotes, @page_size)
       s |> assign_favorites(quotes) |> stream(:quotes, quotes, reset: true)
@@ -320,10 +315,6 @@ defmodule QuotorWeb.HomeLive do
     {:noreply, start_montage(socket, true)}
   end
 
-  def handle_event("shuffle", _params, socket) do
-    {:noreply, run(socket)}
-  end
-
   def handle_event("more", _params, socket) do
     offset = socket.assigns.offset + @page_size
     quotes = Search.search(socket.assigns.query, limit: @page_size + 1, offset: offset)
@@ -357,8 +348,7 @@ defmodule QuotorWeb.HomeLive do
           socket
 
         quote ->
-          stream = if socket.assigns.query == "", do: :discover, else: :quotes
-          stream_insert(socket, stream, quote)
+          stream_insert(socket, :quotes, quote)
       end
     else
       put_flash(socket, :error, "Connecte-toi pour garder tes favoris.")

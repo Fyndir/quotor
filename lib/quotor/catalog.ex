@@ -8,7 +8,7 @@ defmodule Quotor.Catalog do
   alias Quotor.Repo
   alias Quotor.Media
   alias Quotor.Accounts.Scope
-  alias Quotor.Catalog.{Channel, Source, Quote, QuoteWord, Favorite, Report}
+  alias Quotor.Catalog.{Author, Channel, Source, Quote, QuoteWord, Favorite, Report}
 
   @topic "catalog"
 
@@ -31,6 +31,106 @@ defmodule Quotor.Catalog do
     c
     |> Channel.sync_changeset(%{last_synced_at: DateTime.utc_now(:second), last_error: error})
     |> Repo.update()
+  end
+
+  ## Auteurs
+
+  def list_authors, do: Repo.all(from a in Author, order_by: fragment("lower(?)", a.name))
+
+  def get_author!(id), do: Repo.get!(Author, id)
+  def get_author_by_slug(slug), do: Repo.get_by(Author, slug: slug)
+
+  def change_author(%Author{} = author, attrs \\ %{}), do: Author.changeset(author, attrs)
+
+  def create_author(attrs), do: %Author{} |> Author.changeset(attrs) |> Repo.insert()
+
+  def update_author(%Author{} = author, attrs),
+    do: author |> Author.changeset(attrs) |> Repo.update()
+
+  def delete_author(%Author{} = author), do: Repo.delete(author)
+
+  @doc """
+  Retrouve un auteur par son nom (insensible à la casse et aux accents) ou le
+  crée. Utilisé à l'ingestion pour rattacher automatiquement une vidéo à sa
+  chaîne YouTube.
+  """
+  def find_or_create_author(attrs) do
+    name = attrs |> Map.get(:name, "") |> to_string() |> String.trim()
+
+    case name != "" && get_author_by_slug(Author.slugify(name)) do
+      %Author{} = author ->
+        {:ok, author}
+
+      _ ->
+        case create_author(Map.put(attrs, :name, name)) do
+          {:ok, author} ->
+            {:ok, author}
+
+          # course entre deux ingestions : l'auteur vient d'être créé
+          {:error, _} = error ->
+            get_author_by_slug(Author.slugify(name)) |> then(&if(&1, do: {:ok, &1}, else: error))
+        end
+    end
+  end
+
+  @doc """
+  Auteurs ayant au moins une quote visible, avec leur nombre de quotes
+  (une quote compte pour son auteur effectif).
+  """
+  def list_public_authors do
+    from(q in subquery(effective_authors_query()),
+      join: a in Author,
+      on: a.id == q.author_id,
+      group_by: a.id,
+      order_by: [desc: count(q.id), asc: a.name],
+      select: {a, count(q.id)}
+    )
+    |> Repo.all()
+  end
+
+  @doc "Nombre de quotes (toutes) par auteur effectif, pour l'admin."
+  def count_quotes_by_author do
+    from(q in Quote,
+      join: s in assoc(q, :source),
+      group_by: fragment("coalesce(?, ?)", q.author_id, s.author_id),
+      select: {fragment("coalesce(?, ?)", q.author_id, s.author_id), count(q.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  defp effective_authors_query do
+    visible_quotes()
+    |> select([q, s], %{id: q.id, author_id: fragment("coalesce(?, ?)", q.author_id, s.author_id)})
+  end
+
+  @doc "Quotes visibles d'un auteur (les siennes et celles des vidéos dont il est l'auteur)."
+  def author_quotes(%Author{id: id}, limit \\ 24, offset \\ 0) do
+    visible_quotes()
+    |> where([q, s], q.author_id == ^id or (is_nil(q.author_id) and s.author_id == ^id))
+    |> order_by([q], desc: q.views_count, desc: q.id)
+    |> limit(^limit)
+    |> offset(^offset)
+    |> with_display()
+    |> Repo.all()
+  end
+
+  @doc "Auteurs dont le nom correspond à une recherche (suggestions)."
+  def search_authors(query, limit \\ 4) do
+    norm = Quotor.Text.normalize(query)
+
+    if String.length(norm) < 3 do
+      []
+    else
+      slug_part = String.replace(norm, " ", "-")
+
+      Repo.all(
+        from a in Author,
+          where: like(a.slug, ^"%#{slug_part}%"),
+          order_by: [asc: fragment("length(?)", a.slug)],
+          limit: ^limit
+      )
+    end
   end
 
   ## Sources
@@ -104,15 +204,33 @@ defmodule Quotor.Catalog do
       where: q.status == "ready" and q.enabled and s.enabled
   end
 
+  @doc """
+  Précharge ce qu'il faut pour afficher une quote : sa source et les auteurs
+  (de la quote et de la source). À utiliser sur une requête issue de
+  `visible_quotes/0`.
+  """
+  def with_display(query) do
+    preload(query, [q, s], [:author, source: {s, :author}])
+  end
+
+  @doc """
+  Auteur effectif d'une quote : le sien s'il est défini, sinon celui de sa
+  vidéo source (souvent la chaîne YouTube). Nécessite `with_display/1`.
+  """
+  def author_of(%Quote{author: %Author{} = author}), do: author
+  def author_of(%Quote{source: %Source{author: %Author{} = author}}), do: author
+  def author_of(_), do: nil
+
   @doc "Récupère une quote visible (ou `nil`)."
   def get_public_quote(id) do
     visible_quotes()
     |> where([q], q.id == ^id)
-    |> preload([q, s], source: s)
+    |> with_display()
     |> Repo.one()
   end
 
-  def get_quote!(id), do: Quote |> Repo.get!(id) |> Repo.preload([:source, :words])
+  def get_quote!(id),
+    do: Quote |> Repo.get!(id) |> Repo.preload([:author, :words, source: :author])
 
   def list_quote_words(quote_id) do
     Repo.all(from w in QuoteWord, where: w.quote_id == ^quote_id, order_by: w.position)
@@ -135,15 +253,26 @@ defmodule Quotor.Catalog do
     visible_quotes()
     |> order_by(fragment("random()"))
     |> limit(^limit)
-    |> preload([q, s], source: s)
+    |> with_display()
     |> Repo.all()
   end
 
-  def latest_quotes(limit \\ 12) do
+  def latest_quotes(limit \\ 12, offset \\ 0) do
     visible_quotes()
     |> order_by([q], desc: q.inserted_at, desc: q.id)
     |> limit(^limit)
-    |> preload([q, s], source: s)
+    |> offset(^offset)
+    |> with_display()
+    |> Repo.all()
+  end
+
+  @doc "Quotes les plus vues (onglet Découvrir)."
+  def popular_quotes(limit \\ 12, offset \\ 0) do
+    visible_quotes()
+    |> order_by([q], desc: q.views_count, desc: q.id)
+    |> limit(^limit)
+    |> offset(^offset)
+    |> with_display()
     |> Repo.all()
   end
 
@@ -160,7 +289,7 @@ defmodule Quotor.Catalog do
     |> then(fn q -> if source_id, do: where(q, [q], q.source_id == ^source_id), else: q end)
     |> order_by([q], desc: q.id)
     |> limit(^Keyword.get(opts, :limit, 100))
-    |> preload(:source)
+    |> preload([:author, source: :author])
     |> Repo.all()
   end
 
@@ -270,7 +399,7 @@ defmodule Quotor.Catalog do
     visible_quotes()
     |> join(:inner, [q], f in Favorite, on: f.quote_id == q.id and f.user_id == ^user.id)
     |> order_by([q, s, f], desc: f.inserted_at)
-    |> preload([q, s], source: s)
+    |> with_display()
     |> Repo.all()
   end
 

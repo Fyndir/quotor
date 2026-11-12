@@ -48,7 +48,7 @@ defmodule Quotor.Search do
       )
       |> limit(^limit)
       |> offset(^offset)
-      |> preload([quote: q, source: s], source: s)
+      |> Catalog.with_display()
       |> Repo.all()
     end
   end

@@ -24,8 +24,10 @@ defmodule Quotor.Catalog.Source do
     field :quotes_count, :integer, default: 0
     field :file_path, :string
     field :subtitle_path, :string
+    field :channel_url, :string
 
     belongs_to :channel, Quotor.Catalog.Channel
+    belongs_to :author, Quotor.Catalog.Author
     belongs_to :submitted_by, Quotor.Accounts.User
     has_many :quotes, Quotor.Catalog.Quote
 
@@ -37,7 +39,7 @@ defmodule Quotor.Catalog.Source do
   @doc "Création d'une source YouTube à partir d'une URL."
   def youtube_changeset(source, attrs) do
     source
-    |> cast(attrs, [:url, :title, :channel_id, :submitted_by_id])
+    |> cast(attrs, [:url, :title, :channel_id, :submitted_by_id, :author_id])
     |> validate_required([:url], message: "URL obligatoire")
     |> put_youtube_id()
     |> put_change(:origin, "youtube")
@@ -47,7 +49,16 @@ defmodule Quotor.Catalog.Source do
   @doc "Création d'une source à partir d'un fichier envoyé par un admin."
   def upload_changeset(source, attrs) do
     source
-    |> cast(attrs, [:title, :uploader, :url, :file_path, :subtitle_path, :submitted_by_id])
+    |> cast(attrs, [
+      :title,
+      :uploader,
+      :url,
+      :channel_url,
+      :file_path,
+      :subtitle_path,
+      :submitted_by_id,
+      :author_id
+    ])
     |> validate_required([:title, :file_path])
     |> put_change(:origin, "upload")
   end
@@ -64,7 +75,9 @@ defmodule Quotor.Catalog.Source do
       :enabled,
       :quotes_count,
       :file_path,
-      :subtitle_path
+      :subtitle_path,
+      :channel_url,
+      :author_id
     ])
     |> validate_inclusion(:status, @statuses)
   end

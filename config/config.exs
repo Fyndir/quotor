@@ -106,14 +106,17 @@ config :quotor, Oban,
      ]}
   ]
 
+# Auteur et titulaire des droits sur le logiciel Quotor (code, concept, design)
+config :quotor, :owner, name: "Antoine Gamain", since: 2026
+
 # Informations légales affichées dans les mentions légales (surchargées par
 # les variables d'environnement LEGAL_*, cf. config/runtime.exs)
 config :quotor, :legal,
-  editor_name: "[Nom ou pseudonyme de l'éditeur]",
+  editor_name: "Antoine Gamain",
   editor_address:
     "[Adresse postale — peut être communiquée à l'hébergeur seul si éditeur non professionnel]",
   contact_email: "contact@quotor.example",
-  publication_director: "[Nom du directeur de la publication]"
+  publication_director: "Antoine Gamain"
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason

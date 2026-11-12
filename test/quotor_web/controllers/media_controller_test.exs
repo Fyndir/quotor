@@ -19,6 +19,27 @@ defmodule QuotorWeb.MediaControllerTest do
     assert ct =~ "video/mp4"
   end
 
+  test "revalidation par ETag (pas de vieille version en cache)", %{conn: conn} do
+    first = get(conn, "/media/clips/test/sample.mp4")
+    [etag] = get_resp_header(first, "etag")
+    assert get_resp_header(first, "cache-control") == ["public, no-cache"]
+
+    again =
+      build_conn() |> put_req_header("if-none-match", etag) |> get("/media/clips/test/sample.mp4")
+
+    assert again.status == 304
+
+    # fichier régénéré : nouvel ETag, contenu renvoyé
+    File.write!(Quotor.Media.abs_path("clips/test/sample.mp4"), "nouvelle version")
+    File.touch!(Quotor.Media.abs_path("clips/test/sample.mp4"), System.os_time(:second) + 10)
+
+    changed =
+      build_conn() |> put_req_header("if-none-match", etag) |> get("/media/clips/test/sample.mp4")
+
+    assert changed.status == 200
+    assert changed.resp_body == "nouvelle version"
+  end
+
   test "requête Range (lecture vidéo Safari)", %{conn: conn} do
     conn = conn |> put_req_header("range", "bytes=2-5") |> get("/media/clips/test/sample.mp4")
     assert conn.status == 206

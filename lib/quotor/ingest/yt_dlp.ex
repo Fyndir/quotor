@@ -130,6 +130,7 @@ defmodule Quotor.Ingest.YtDlp do
       %{
         title: info["title"],
         uploader: info["uploader"] || info["channel"],
+        channel_url: info["channel_url"] || info["uploader_url"],
         duration_s: info["duration"] && round(info["duration"]),
         published_on: parse_date(info["upload_date"])
       }

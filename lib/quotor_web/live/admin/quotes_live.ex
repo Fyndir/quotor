@@ -38,6 +38,7 @@ defmodule QuotorWeb.Admin.QuotesLive do
               <th></th>
               <th>Texte</th>
               <th>Source</th>
+              <th>Auteur</th>
               <th>Statut</th>
               <th>Vues</th>
               <th></th>
@@ -84,6 +85,29 @@ defmodule QuotorWeb.Admin.QuotesLive do
                 <% end %>
               </td>
               <td class="text-xs max-w-48 truncate">{quote.source.title}</td>
+              <td>
+                <form id={"quote-author-#{quote.id}"} phx-change="set_author">
+                  <input type="hidden" name="quote_id" value={quote.id} />
+                  <select
+                    name="author_id"
+                    class="select select-xs w-44"
+                    aria-label="Auteur de la quote"
+                  >
+                    <option value="">
+                      {if quote.source.author,
+                        do: "Vidéo : #{quote.source.author.name}",
+                        else: "— aucun —"}
+                    </option>
+                    <option
+                      :for={{name, id} <- @author_options}
+                      value={id}
+                      selected={quote.author_id == id}
+                    >
+                      {name}
+                    </option>
+                  </select>
+                </form>
+              </td>
               <td><.status_badge status={quote.status} /></td>
               <td>{quote.views_count}</td>
               <td class="text-right whitespace-nowrap">
@@ -120,7 +144,13 @@ defmodule QuotorWeb.Admin.QuotesLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, page_title: "Quotes", editing: nil, edit_form: to_form(%{"text" => ""}))}
+    {:ok,
+     assign(socket,
+       page_title: "Quotes",
+       editing: nil,
+       edit_form: to_form(%{"text" => ""}),
+       author_options: Enum.map(Catalog.list_authors(), &{&1.name, &1.id})
+     )}
   end
 
   @impl true
@@ -163,6 +193,13 @@ defmodule QuotorWeb.Admin.QuotesLive do
       {:ok, _} -> {:noreply, socket |> assign(editing: nil) |> load()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "Texte invalide.")}
     end
+  end
+
+  def handle_event("set_author", %{"quote_id" => id, "author_id" => author_id}, socket) do
+    quote = Catalog.get_quote!(id)
+    author_id = if author_id == "", do: nil, else: author_id
+    {:ok, _} = Catalog.update_quote(quote, %{author_id: author_id})
+    {:noreply, socket |> put_flash(:info, "Auteur de la quote mis à jour.") |> load()}
   end
 
   def handle_event("toggle", %{"id" => id}, socket) do

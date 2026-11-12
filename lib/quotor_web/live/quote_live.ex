@@ -2,7 +2,7 @@ defmodule QuotorWeb.QuoteLive do
   @moduledoc "Page d'un extrait : lecture, source (attribution), partage, signalement."
   use QuotorWeb, :live_view
 
-  alias Quotor.{Catalog, Media, Text}
+  alias Quotor.{Catalog, Media}
   alias Quotor.Accounts.Scope
 
   @impl true
@@ -29,14 +29,7 @@ defmodule QuotorWeb.QuoteLive do
 
         <aside class="space-y-4">
           <div class="rounded-2xl bg-base-200 p-5 space-y-2 text-sm">
-            <p class="text-xs uppercase tracking-widest text-base-content/50">Source</p>
-            <p class="font-semibold">{@quote.source.title}</p>
-            <p :if={@quote.source.uploader} class="text-base-content/70">
-              {@quote.source.uploader}
-            </p>
-            <p class="text-base-content/70">
-              à {Text.format_ms(@quote.start_ms)}
-            </p>
+            <.attribution quote={@quote} />
             <a
               :if={original_url(@quote.source, @quote.start_ms)}
               href={original_url(@quote.source, @quote.start_ms)}
@@ -151,7 +144,7 @@ defmodule QuotorWeb.QuoteLive do
     |> where([q], q.source_id == ^quote.source_id and q.id != ^quote.id)
     |> order_by([q], fragment("abs(? - ?)", q.start_ms, ^quote.start_ms))
     |> limit(6)
-    |> preload([q, s], source: s)
+    |> Catalog.with_display()
     |> Quotor.Repo.all()
   end
 end

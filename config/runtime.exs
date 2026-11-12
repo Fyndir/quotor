@@ -24,7 +24,10 @@ if config_env() == :dev do
     ]
 end
 
-if media_dir = System.get_env("MEDIA_DIR") do
+# Jamais en test : les tests utilisent (et nettoient) un dossier temporaire dédié.
+media_dir = System.get_env("MEDIA_DIR")
+
+if config_env() != :test and media_dir do
   config :quotor, :media_dir, media_dir
 end
 

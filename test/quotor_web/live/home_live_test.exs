@@ -21,7 +21,9 @@ defmodule QuotorWeb.HomeLiveTest do
     assert html =~ "Trouve"
     assert html =~ "Créer un compte"
     assert has_element?(view, "#search-form")
-    assert has_element?(view, "#discover article")
+    # plus d'aperçus sur l'accueil : un lien vers l'onglet Découvrir à la place
+    refute has_element?(view, "article")
+    assert has_element?(view, "#discover-hint a[href='/decouvrir']")
     # pas de favoris pour un anonyme
     refute has_element?(view, "button[phx-click=toggle_favorite]")
   end

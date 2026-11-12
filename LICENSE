@@ -1,0 +1,29 @@
+Quotor
+Copyright (c) 2026 Antoine Gamain. Tous droits réservés.
+
+Le logiciel Quotor — son code source, son architecture, sa documentation, son
+interface graphique, son nom, son logo et le concept de l'application (moteur
+de recherche d'extraits vidéo sonores et assemblage de montages à partir de ces
+extraits) — a été conçu et développé par Antoine Gamain, qui en est l'auteur et
+le titulaire exclusif des droits.
+
+Aucune licence n'est concédée. Sauf autorisation écrite et préalable de
+l'auteur, il est interdit de reproduire, représenter, modifier, adapter,
+traduire, distribuer, publier, vendre, louer, sous-licencier ou exploiter de
+quelque manière que ce soit tout ou partie de ce logiciel, que ce soit à titre
+gratuit ou onéreux (articles L. 122-4 et L. 335-2 et suivants du Code de la
+propriété intellectuelle).
+
+La consultation de ce dépôt, lorsqu'elle est rendue possible, ne vaut pas
+autorisation d'utilisation.
+
+Composants tiers : Quotor s'appuie sur des bibliothèques et outils open source
+(Elixir, Phoenix, PostgreSQL, ffmpeg, yt-dlp…) qui restent régis par leurs
+propres licences, listées dans le fichier NOTICE.md. La présente mention ne
+s'applique pas à ces composants.
+
+Contenus vidéo : les extraits diffusés par l'application restent la propriété
+de leurs auteurs et ayants droit respectifs ; ils ne font pas partie du
+logiciel et ne sont pas couverts par la présente mention.
+
+Contact : voir les mentions légales de l'application (/mentions-legales).

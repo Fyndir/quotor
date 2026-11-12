@@ -14,10 +14,18 @@ defmodule QuotorWeb.PageControllerTest do
     assert html =~ "Deckmyn"
   end
 
-  test "le pied de page affiche le copyright", %{conn: conn} do
-    html = conn |> get(~p"/mentions-legales") |> html_response(200)
-    assert html =~ "© #{Date.utc_today().year} Quotor"
+  test "le pied de page affiche le copyright de l'auteur de Quotor", %{conn: conn} do
+    html = conn |> get(~p"/conditions") |> html_response(200)
+    assert html =~ "Quotor — concept, design et code © 2026"
+    assert html =~ "Antoine Gamain. Tous droits"
     assert html =~ "propriété de leurs auteurs"
+  end
+
+  test "les mentions légales décrivent la propriété de l'application", %{conn: conn} do
+    html = conn |> get(~p"/mentions-legales") |> html_response(200)
+    assert html =~ "Propriété de l'application"
+    assert html =~ "titulaire exclusif des"
+    assert html =~ "L. 335-2"
   end
 
   test "health check", %{conn: conn} do

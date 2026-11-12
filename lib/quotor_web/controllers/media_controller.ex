@@ -19,14 +19,29 @@ defmodule QuotorWeb.MediaController do
   def show(conn, _params), do: send_resp(conn, 404, "Not found")
 
   defp send_media(conn, path) do
-    %File.Stat{size: size} = File.stat!(path)
+    %File.Stat{size: size, mtime: mtime} = File.stat!(path, time: :posix)
+
+    # Un fichier régénéré au même chemin (nouvelle ingestion) change d'ETag :
+    # le navigateur revalide à chaque lecture (réponse 304 très légère) au lieu
+    # de rejouer une ancienne version gardée en cache.
+    etag = ~s("#{Integer.to_string(mtime, 36)}-#{Integer.to_string(size, 36)}")
 
     conn =
       conn
+      |> put_resp_header("etag", etag)
+      |> put_resp_header("cache-control", "public, no-cache")
+
+    if etag in get_req_header(conn, "if-none-match") do
+      send_resp(conn, 304, "")
+    else
+      conn
       |> put_resp_content_type(MIME.from_path(path), nil)
       |> put_resp_header("accept-ranges", "bytes")
-      |> put_resp_header("cache-control", "public, max-age=86400")
+      |> send_range(path, size)
+    end
+  end
 
+  defp send_range(conn, path, size) do
     case parse_range(get_req_header(conn, "range"), size) do
       {:ok, first, last} ->
         conn

@@ -33,7 +33,12 @@ defmodule Quotor.FakeDownloader do
          %{
            video_path: video,
            subtitle_path: subtitle,
-           metadata: %{title: "Vidéo de test", uploader: "Chaîne test", duration_s: 7}
+           metadata: %{
+             title: "Vidéo de test",
+             uploader: "Chaîne test",
+             channel_url: "https://www.youtube.com/@chainetest",
+             duration_s: 7
+           }
          }}
     end
   end

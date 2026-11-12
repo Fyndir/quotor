@@ -15,10 +15,13 @@ defmodule QuotorWeb.OpenGraph do
   @doc "Balises pour une quote."
   def for_quote(quote) do
     source = quote.source
+    author = Quotor.Catalog.author_of(quote)
 
     %{
       type: "video.other",
-      title: "« #{String.slice(quote.text, 0, 150)} »",
+      title:
+        "« #{String.slice(quote.text, 0, 150)} »" <>
+          if(author, do: " — #{author.name}", else: ""),
       description:
         [source && source.title, source && source.uploader]
         |> Enum.reject(&is_nil/1)

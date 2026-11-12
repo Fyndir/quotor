@@ -10,6 +10,7 @@ defmodule Quotor.Ingest.Downloader do
           metadata: %{
             optional(:title) => String.t(),
             optional(:uploader) => String.t(),
+            optional(:channel_url) => String.t(),
             optional(:duration_s) => integer(),
             optional(:published_on) => Date.t()
           }

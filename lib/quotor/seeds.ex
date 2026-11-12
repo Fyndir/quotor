@@ -22,7 +22,29 @@ defmodule Quotor.Seeds do
   def run do
     seed_admin()
     seed_channels()
+    backfill_authors()
     :ok
+  end
+
+  @doc """
+  Rattache à leur chaîne (auteur de type « chaîne ») les vidéos importées
+  avant la gestion des auteurs. Idempotent.
+  """
+  def backfill_authors do
+    import Ecto.Query
+
+    from(s in Catalog.Source, where: is_nil(s.author_id) and not is_nil(s.uploader))
+    |> Repo.all()
+    |> Enum.each(fn source ->
+      with {:ok, author} <-
+             Catalog.find_or_create_author(%{
+               name: source.uploader,
+               kind: "channel",
+               url: source.channel_url
+             }) do
+        Catalog.update_source(source, %{author_id: author.id})
+      end
+    end)
   end
 
   def seed_admin do

@@ -53,6 +53,7 @@ defmodule QuotorWeb.Layouts do
         {:sources, ~p"/admin/sources", "hero-film", "Vidéos sources"},
         {:channels, ~p"/admin/chaines", "hero-tv", "Chaînes suivies"},
         {:quotes, ~p"/admin/quotes", "hero-chat-bubble-bottom-center-text", "Quotes"},
+        {:authors, ~p"/admin/auteurs", "hero-user-group", "Auteurs"},
         {:reports, ~p"/admin/signalements", "hero-flag", "Signalements"},
         {:users, ~p"/admin/utilisateurs", "hero-users", "Utilisateurs"},
         {:logs, ~p"/admin/logs", "hero-command-line", "Logs"}
@@ -125,6 +126,14 @@ defmodule QuotorWeb.Layouts do
         </.link>
 
         <nav class="ml-auto flex items-center gap-1 text-sm" aria-label="Navigation principale">
+          <.link navigate={~p"/decouvrir"} class="nav-link">
+            <.icon name="hero-sparkles" class="size-4" />
+            <span class="hidden sm:inline">Découvrir</span>
+          </.link>
+          <.link navigate={~p"/auteurs"} class="nav-link">
+            <.icon name="hero-user-group" class="size-4" />
+            <span class="hidden sm:inline">Auteurs</span>
+          </.link>
           <.link :if={@profile != :anonymous} navigate={~p"/favoris"} class="nav-link">
             <.icon name="hero-heart" class="size-4" />
             <span class="hidden sm:inline">Favoris</span>
@@ -185,15 +194,28 @@ defmodule QuotorWeb.Layouts do
             Signaler un contenu
           </.link>
         </div>
+        <p id="owner-notice" class="text-base-content/80">
+          Quotor — concept, design et code © {copyright_years()} {owner_name()}. Tous droits
+          réservés.
+        </p>
         <p>
-          © {Date.utc_today().year} Quotor. Les extraits vidéo restent la propriété de leurs auteurs
-          et ayants droit respectifs ; ils sont proposés à des fins exclusivement parodiques et
-          humoristiques (art. L. 122-5, 4° du Code de la propriété intellectuelle). Quotor n'est
-          affilié à aucun des créateurs cités.
+          Les extraits vidéo restent la propriété de leurs auteurs et ayants droit respectifs ; ils
+          sont proposés à des fins exclusivement parodiques et humoristiques (art. L. 122-5, 4° du
+          Code de la propriété intellectuelle). Quotor n'est affilié à aucun des créateurs cités.
         </p>
       </div>
     </footer>
     """
+  end
+
+  @doc "Nom de l'auteur et titulaire des droits sur Quotor."
+  def owner_name, do: Application.get_env(:quotor, :owner, [])[:name] || "Antoine Gamain"
+
+  @doc "Années du copyright : « 2026 » puis « 2026–2027 »…"
+  def copyright_years do
+    since = Application.get_env(:quotor, :owner, [])[:since] || 2026
+    now = Date.utc_today().year
+    if now > since, do: "#{since}–#{now}", else: "#{since}"
   end
 
   @doc """

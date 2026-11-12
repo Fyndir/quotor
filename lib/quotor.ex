@@ -1,9 +1,12 @@
 defmodule Quotor do
   @moduledoc """
-  Quotor keeps the contexts that define your domain
-  and business logic.
+  Quotor — moteur de recherche d'extraits vidéo sonores (« quotes ») et
+  assemblage de montages à partir de ces extraits.
 
-  Contexts are also responsible for managing your data, regardless
-  if it comes from the database, an external API or others.
+  Concept, design et code © 2026 Antoine Gamain. Tous droits réservés.
+  Voir les fichiers LICENSE et NOTICE.md à la racine du projet.
+
+  Contextes principaux : `Quotor.Catalog` (sources, quotes, auteurs),
+  `Quotor.Ingest` (alimentation), `Quotor.Search` et `Quotor.Montages`.
   """
 end

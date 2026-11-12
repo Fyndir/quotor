@@ -1,3 +1,5 @@
+# Quotor — concept, design et code © 2026 Antoine Gamain. Tous droits réservés.
+# Voir LICENSE (aucune licence d'utilisation concédée) et NOTICE.md (composants tiers).
 defmodule Quotor.MixProject do
   use Mix.Project
 

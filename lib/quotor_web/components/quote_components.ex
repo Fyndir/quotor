@@ -15,7 +15,10 @@ defmodule QuotorWeb.QuoteComponents do
   attr :id, :string, default: nil
 
   def quote_card(assigns) do
-    assigns = assign_new(assigns, :dom_id, fn -> assigns.id || "quote-#{assigns.quote.id}" end)
+    assigns =
+      assigns
+      |> assign_new(:dom_id, fn -> assigns.id || "quote-#{assigns.quote.id}" end)
+      |> assign(:author, Quotor.Catalog.author_of(assigns.quote))
 
     ~H"""
     <article
@@ -40,13 +43,23 @@ defmodule QuotorWeb.QuoteComponents do
       </div>
 
       <div class="flex items-center gap-2 px-3 py-2 text-xs">
-        <.link
-          navigate={~p"/q/#{@quote.id}"}
-          class="truncate flex-1 text-base-content/70 hover:text-base-content"
-          title={@quote.source && @quote.source.title}
-        >
-          {@quote.source && (@quote.source.uploader || @quote.source.title)}
-        </.link>
+        <div class="min-w-0 flex-1 leading-tight">
+          <.link
+            :if={@author}
+            navigate={~p"/auteurs/#{@author.slug}"}
+            class="block truncate font-semibold text-base-content/80 hover:text-primary"
+            title={"Toutes les répliques de #{@author.name}"}
+          >
+            {@author.name}
+          </.link>
+          <.link
+            navigate={~p"/q/#{@quote.id}"}
+            class="block truncate text-base-content/50 hover:text-base-content"
+            title={@quote.source && @quote.source.title}
+          >
+            {source_label(@quote.source, @author)}
+          </.link>
+        </div>
         <button
           :if={@can_favorite}
           type="button"
@@ -166,4 +179,73 @@ defmodule QuotorWeb.QuoteComponents do
   def status_label(other), do: other
 
   def original_url(source, start_ms), do: Source.original_url(source, start_ms)
+
+  @doc """
+  Ligne « source » d'une carte : le titre de la vidéo, précédé de la chaîne
+  quand l'auteur affiché est une personne différente de la chaîne.
+  """
+  def source_label(nil, _author), do: nil
+
+  def source_label(source, author) do
+    channel = source.uploader
+    author_name = author && author.name
+
+    if is_binary(channel) and is_binary(source.title) and author_name != channel do
+      "#{channel} · #{source.title}"
+    else
+      source.title || channel
+    end
+  end
+
+  @doc "Bloc « qui parle / chaîne / source » de la page d'un extrait."
+  attr :quote, :map, required: true
+
+  def attribution(assigns) do
+    assigns = assign(assigns, :author, Quotor.Catalog.author_of(assigns.quote))
+
+    ~H"""
+    <dl class="space-y-3 text-sm">
+      <div :if={@author}>
+        <dt class="text-xs uppercase tracking-widest text-base-content/50">
+          {if @author.kind == "channel", do: "Auteur (chaîne)", else: "Qui parle"}
+        </dt>
+        <dd>
+          <.link
+            navigate={~p"/auteurs/#{@author.slug}"}
+            class="font-semibold hover:text-primary"
+            id="quote-author"
+          >
+            {@author.name}
+          </.link>
+        </dd>
+      </div>
+      <div :if={@quote.source.uploader}>
+        <dt class="text-xs uppercase tracking-widest text-base-content/50">Chaîne</dt>
+        <dd>
+          <a
+            :if={@quote.source.channel_url}
+            href={@quote.source.channel_url}
+            target="_blank"
+            rel="noopener"
+            class="hover:text-primary"
+          >
+            {@quote.source.uploader}
+            <.icon name="hero-arrow-top-right-on-square-micro" class="size-3" />
+          </a>
+          <span :if={!@quote.source.channel_url}>{@quote.source.uploader}</span>
+        </dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-widest text-base-content/50">Source</dt>
+        <dd class="font-semibold">{@quote.source.title}</dd>
+        <dd class="text-base-content/70">
+          à {Quotor.Text.format_ms(@quote.start_ms)}
+          <span :if={@quote.source.published_on}>
+            · publiée le {Calendar.strftime(@quote.source.published_on, "%d/%m/%Y")}
+          </span>
+        </dd>
+      </div>
+    </dl>
+    """
+  end
 end
