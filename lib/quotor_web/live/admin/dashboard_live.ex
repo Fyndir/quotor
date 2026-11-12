@@ -82,6 +82,19 @@ defmodule QuotorWeb.Admin.DashboardLive do
             <dd>{@snap.system.process_count}</dd>
             <dt class="text-base-content/60">File d'exécution</dt>
             <dd>{@snap.system.run_queue} ({@snap.system.schedulers} ordonnanceurs)</dd>
+            <dt class="text-base-content/60">Rôle du nœud</dt>
+            <dd>
+              <span class="badge badge-sm badge-primary">{@snap.system.role}</span>
+              <span class="text-xs text-base-content/60">
+                {if @snap.system.queues == [],
+                  do: "aucune tâche exécutée ici (workers séparés)",
+                  else:
+                    "files : " <>
+                      Enum.map_join(@snap.system.queues, ", ", fn {q, n} -> "#{q}×#{n}" end)}
+              </span>
+            </dd>
+            <dt class="text-base-content/60">Stockage</dt>
+            <dd>{@snap.system.storage}</dd>
             <dt class="text-base-content/60">Versions</dt>
             <dd>
               Quotor {@snap.system.version} · Elixir {@snap.system.elixir} · OTP {@snap.system.otp}

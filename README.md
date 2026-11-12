@@ -25,6 +25,7 @@ compris), et on peut assembler plusieurs extraits pour composer une phrase qui n
 - [Démarrage rapide](#démarrage-rapide)
 - [Déploiement](#déploiement)
 - [Configuration](#configuration)
+- [Sauvegardes](#sauvegardes)
 - [Architecture](#architecture)
 - [Tests et CI](#tests-et-ci)
 - [Limites connues](#limites-connues)
@@ -151,6 +152,10 @@ Les logs complets partent sur la sortie standard (Docker / Render).
 
 ![Logs](docs/screenshots/admin-logs.png)
 
+**Sauvegardes** : état des sauvegardes (planification, rétention, destination, dernier échec,
+alerte si la dernière a plus de 36 h), lancement immédiat, téléchargement et suppression des
+archives, et commande de restauration prête à copier. Voir [Sauvegardes](#sauvegardes).
+
 ### Pages légales
 
 Mentions légales (propriété de l'application, LCEN, hébergeurs, RGPD, cookies), conditions
@@ -171,6 +176,9 @@ docker compose -f docker-compose.dev.yml up            # http://localhost:4000
 
 - Admin de développement : `admin@quotor.local` / `quotor-admin-dev`.
 - PostgreSQL de dev exposé sur le port **5433**.
+- Les médias (clips, vignettes, montages) sont dans le volume Docker `quotor_media`, la base dans
+  `quotor_pgdata_dev` : rien n'est perdu en recréant les conteneurs (`down`, `up --build`). Seul
+  `docker compose … down -v` les supprime.
 
 Données de démonstration (3 vidéos, 15 extraits, un montage, un signalement, un utilisateur
 `demo@quotor.local` / `quotor-demo-pass`) :
@@ -190,16 +198,33 @@ Avec Elixir installé localement (et ffmpeg, yt-dlp, PostgreSQL) : `mix setup &&
 ### Image de production en local
 
 ```bash
-docker build -t quotor .
-docker run -p 4000:4000 -v quotor_data:/data \
-  -e ADMIN_EMAIL=admin@example.com -e ADMIN_PASSWORD='un-mot-de-passe-long' \
-  quotor
+ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD='un-mot-de-passe-long' docker compose up -d --build
 ```
 
+(équivalent sans compose : `docker run -p 4000:4000 -v quotor_data:/data -e ADMIN_EMAIL=… -e ADMIN_PASSWORD=… quotor`
+— **ne pas oublier `-v`**, sinon les données vont dans un volume anonyme perdu à la recréation.)
+
 Sans `DATABASE_URL`, l'image **initialise et démarre son propre PostgreSQL** (dans
-`/data/postgres`) et génère `SECRET_KEY_BASE` (conservé dans `/data`). Tout est persistant tant que
-le volume `/data` est conservé. Accédez-y via `http://localhost:4000` : les autres hôtes sont
+`/data/postgres`) et génère `SECRET_KEY_BASE` (conservé dans `/data`). Base, extraits et montages
+sont dans le volume nommé `quotor_data`, indépendant du conteneur : mises à jour et redémarrages ne
+perdent rien. Sauvegarde :
+
+```bash
+docker run --rm -v quotor_data:/data -v "$PWD":/backup alpine tar czf /backup/quotor-data.tgz -C /data .
+```
+
+Accédez-y via `http://localhost:4000` : les autres hôtes sont
 redirigés en HTTPS.
+
+### Architecture de production en local (site + workers + S3)
+
+```bash
+docker compose -f docker-compose.roles.yml up --build              # http://localhost:4100
+docker compose -f docker-compose.roles.yml up -d --scale worker=3  # 3 workers en parallèle
+```
+
+Lance PostgreSQL, un stockage S3 local (RustFS), le site (`ROLE=web`) et des workers
+(`ROLE=worker`), comme en production. L'admin est `admin@quotor.local` / `quotor-admin-roles`.
 
 ---
 
@@ -230,31 +255,89 @@ TLS (avec vérification du certificat) est activé automatiquement grâce à `ss
 utilisez l'hôte `-pooler`, ajoutez `DATABASE_POOLER=true`. Les extensions nécessaires (`citext`,
 `pg_trgm`) sont créées par les migrations.
 
-### 3. Application sur Render
+### 3. Stockage des médias sur Cloudflare R2
 
-1. Dashboard Render → **New → Blueprint** → sélectionnez le dépôt : `render.yaml` décrit le service
-   (Docker, région Francfort, health check `/health`, disque persistant de 10 Go).
+Les clips, vignettes et montages sont stockés dans un bucket compatible S3. Le site et les workers
+y accèdent tous les deux, et aucun disque persistant n'est nécessaire.
+
+1. Dashboard Cloudflare → **R2** → **Create bucket**, nommé par exemple `quotor`.
+2. **R2 → Manage API tokens → Create API token**, avec la permission **Object Read & Write**
+   limitée à ce bucket. Notez :
+   - l'**Access Key ID**, à mettre dans `S3_ACCESS_KEY_ID` ;
+   - le **Secret Access Key**, à mettre dans `S3_SECRET_ACCESS_KEY` ;
+   - l'endpoint `https://<ID-compte>.r2.cloudflarestorage.com`, à mettre dans `S3_ENDPOINT`.
+3. Choisissez comment les vidéos sont servies :
+   - **bucket public** (recommandé) : activez l'accès public (domaine `r2.dev` ou domaine
+     personnalisé) et renseignez son URL dans `S3_PUBLIC_URL`. Les navigateurs et Discord lisent
+     alors les vidéos directement sur R2, sans passer par le site ;
+   - **bucket privé** : laissez `S3_PUBLIC_URL` vide. Le site relaie les fichiers sous `/media/…`.
+
+4. Créez un **second bucket, privé**, pour les sauvegardes (`quotor-backups`, valeur par défaut
+   de `BACKUP_S3_BUCKET` dans le blueprint) et étendez-lui le jeton. Ne le rendez jamais public :
+   les sauvegardes contiennent la base, comptes compris.
+
+Tout autre fournisseur compatible S3 convient (AWS S3, Scaleway…). Sans `S3_BUCKET`, Quotor
+utilise le disque local (`MEDIA_DIR`).
+
+### 4. Application sur Render : un site et un worker
+
+1. Dashboard Render → **New → Blueprint** → sélectionnez le dépôt. `render.yaml` crée deux
+   services à partir de la même image Docker :
+   - `quotor` (`ROLE=web`) : le site, avec health check `/health` ;
+   - `quotor-worker` (`ROLE=worker`) : téléchargements, découpes ffmpeg et tâches planifiées.
+
+   Ils partagent un groupe de variables, `quotor-shared`.
 2. Renseignez les variables demandées :
    - `DATABASE_URL` (Neon) ;
+   - les variables `S3_*` (R2) ;
    - `ADMIN_EMAIL` et `ADMIN_PASSWORD` (12 caractères minimum) ;
-   - `LEGAL_EDITOR_NAME`, `LEGAL_EDITOR_ADDRESS`, `LEGAL_CONTACT_EMAIL`, `LEGAL_PUBLICATION_DIRECTOR`.
+   - les variables `LEGAL_*`.
 
    `SECRET_KEY_BASE` est généré par Render, et `PHX_HOST` est déduit de l'URL Render.
-3. Déployez. À chaque démarrage, l'image exécute les migrations, crée ou promeut l'admin, puis lance
-   l'application.
-4. *(Recommandé)* Si YouTube bloque les téléchargements (voir [limites](#limites-connues)) :
+3. Déployez. Au démarrage, chaque service exécute les migrations et crée ou promeut l'admin, ce qui
+   est sans risque même en parallèle. Le site met les tâches en file, le worker les exécute.
+4. *(Si YouTube bloque les téléchargements)* :
    1. exportez un `cookies.txt` d'un compte YouTube ;
-   2. ajoutez-le comme **Secret File** Render ;
+   2. ajoutez-le comme **Secret File** du worker ;
    3. définissez `YTDLP_COOKIES=/etc/secrets/cookies.txt`.
+
+   Vous pouvez aussi faire tourner le worker chez vous (voir ci-dessous).
 5. *(Domaine personnalisé)* Ajoutez-le dans Render et définissez `PHX_HOST=quotor.example.fr`.
 
-> **Offre gratuite Render** : supprimez le bloc `disk` du `render.yaml` et passez à `plan: free`.
-> Les clips seront alors perdus à chaque redéploiement ou redémarrage.
+**Plus de puissance** :
 
-### 4. Premiers pas en production
+- augmentez `WORKER_MEDIA_CONCURRENCY`, qui fixe le nombre de découpes simultanées par worker
+  (environ un par cœur) ;
+- ou ajoutez des instances au service worker. Les workers se partagent automatiquement les tâches
+  via PostgreSQL.
 
-1. Connectez-vous avec `ADMIN_EMAIL`, puis ouvrez **Admin → Supervision** : ffmpeg et yt-dlp doivent
-   être détectés.
+**Une seule machine** : sans `ROLE` (valeur `all`), un seul service fait tout. C'est suffisant pour
+démarrer, mais le site ralentit pendant les découpes.
+
+#### Option : un worker chez soi
+
+YouTube bloque rarement les connexions de particuliers. Un worker lancé sur un PC ou un Raspberry Pi
+télécharge donc bien plus fiablement qu'un serveur Render. Il suffit de lui donner accès à la même
+base et au même bucket :
+
+```bash
+docker run -d --restart unless-stopped --name quotor-worker \
+  -e ROLE=worker \
+  -e DATABASE_URL='postgresql://…neon.tech/neondb?sslmode=require' \
+  -e SECRET_KEY_BASE='<même valeur que sur Render>' \
+  -e S3_ENDPOINT=https://<ID-compte>.r2.cloudflarestorage.com -e S3_BUCKET=quotor \
+  -e S3_ACCESS_KEY_ID=… -e S3_SECRET_ACCESS_KEY=… \
+  quotor
+```
+
+Supprimez alors le service `quotor-worker` de Render, ou laissez les deux se partager le travail.
+
+### 5. Premiers pas en production
+
+1. Connectez-vous avec `ADMIN_EMAIL`, puis ouvrez **Admin → Supervision**. Vérifiez trois choses :
+   - le rôle du nœud est `web` ;
+   - le stockage indiqué est `S3 · quotor` ;
+   - ffmpeg et yt-dlp sont détectés.
 2. **Admin → Vidéos sources** : collez quelques URLs YouTube ayant des sous-titres français. Suivez
    leur passage par les statuts *téléchargement*, *découpe* puis *prête*.
 3. **Admin → Chaînes suivies** : vérifiez l'URL de chaque chaîne, ajustez le nombre de vidéos, puis
@@ -274,8 +357,21 @@ utilisez l'hôte `-pooler`, ajoutez `DATABASE_POOLER=true`. Les extensions néce
 | `PHX_HOST` | nom d'hôte public | `RENDER_EXTERNAL_HOSTNAME`, sinon `localhost` |
 | `PORT` | port HTTP | `4000` |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | admin créé ou promu au démarrage (≥ 12 caractères) | – |
-| `MEDIA_DIR` | dossier des médias | `/data/media` |
+| `ROLE` | `all` (site + tâches), `web` (site seul), `worker` (tâches seules, sans serveur HTTP) | `all` |
+| `WORKER_MEDIA_CONCURRENCY` | découpes ffmpeg simultanées sur un worker | `2` |
+| `S3_BUCKET` | active le stockage objet (sinon disque local) | – |
+| `S3_ENDPOINT` | endpoint S3 (R2 : `https://<ID-compte>.r2.cloudflarestorage.com`) | – |
+| `S3_REGION` | région S3 (`auto` pour R2) | `auto` |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | clés d'accès au bucket | – |
+| `S3_PUBLIC_URL` | URL publique du bucket ; vide : le site relaie les fichiers (bucket privé) | – |
+| `S3_CREATE_BUCKET` | crée le bucket au démarrage s'il manque (serveur S3 local) | `false` |
+| `MEDIA_DIR` | stockage local ; avec S3, espace de travail et cache | `/data/media` |
 | `KEEP_SOURCES` | conserver les vidéos sources après découpe | `false` |
+| `BACKUP_ENABLED` | sauvegarde automatique chaque nuit (2 h UTC) | `true` |
+| `BACKUP_KEEP` | nombre de sauvegardes conservées | `7` |
+| `BACKUP_MEDIA` | `auto` (médias inclus s'ils sont sur disque local), `always` (aussi depuis S3), `never` | `auto` |
+| `BACKUP_S3_BUCKET` | bucket **privé** des sauvegardes (mêmes `S3_ENDPOINT` et clés) ; sinon `BACKUP_DIR` | – |
+| `BACKUP_DIR` | dossier des sauvegardes, à placer sur un volume distinct | `/data/backups` |
 | `YTDLP_PATH` / `YTDLP_COOKIES` / `YTDLP_EXTRA_ARGS` | options de yt-dlp | – |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `MAIL_FROM` | emails (liens de connexion, changement d'email) ; sans SMTP, ils sont seulement journalisés | – |
 | `LEGAL_EDITOR_NAME`, `LEGAL_EDITOR_ADDRESS`, `LEGAL_CONTACT_EMAIL`, `LEGAL_PUBLICATION_DIRECTOR` | contenu des mentions légales | valeurs à remplacer |
@@ -283,24 +379,78 @@ utilisez l'hôte `-pooler`, ajoutez `DATABASE_POOLER=true`. Les extensions néce
 
 ---
 
+## Sauvegardes
+
+Chaque nuit à 2 h UTC (et à la demande depuis **Admin → Sauvegardes**), Quotor crée une archive
+`quotor-AAAAMMJJ-HHMMSS.tar` :
+
+| Contenu | Détail |
+| --- | --- |
+| `db.dump` | `pg_dump` compressé de toute la base, sans la file de tâches Oban |
+| `clips/`, `thumbs/`, `montages/`, `sources/` | les médias, s'ils sont sur disque local (ou avec `BACKUP_MEDIA=always`) |
+| `manifest.json` | date, version, nombre de médias |
+
+Les `BACKUP_KEEP` plus récentes sont gardées, les autres supprimées.
+
+**Où vont les archives :**
+
+- avec `BACKUP_S3_BUCKET` → dans ce bucket privé (préfixe `backups/`). C'est le cas du blueprint
+  Render, où les conteneurs n'ont pas de disque persistant ;
+- sinon → dans `BACKUP_DIR`. Les fichiers compose montent ce dossier sur son propre volume :
+  `quotor_backups` en développement, `quotor_backups_prod` pour l'image de production. Pour se
+  protéger d'une panne de la machine, copiez régulièrement ce volume ailleurs, ou téléchargez les
+  archives depuis l'admin.
+
+**Restaurer** : la restauration **remplace** la base (`pg_restore --clean`, en une transaction) et
+réécrit les médias présents dans l'archive. Arrêtez de préférence les workers, puis :
+
+```bash
+# image de production (docker exec -it <conteneur> …, ou Shell du service sur Render)
+bin/quotor eval 'Quotor.Release.backups()'                                 # lister
+bin/quotor eval 'Quotor.Release.restore("quotor-20261113-020000.tar")'     # base + médias
+bin/quotor eval 'Quotor.Release.restore("/tmp/archive.tar", media: false)' # archive locale, base seule
+bin/quotor eval 'Quotor.Release.backup()'                                  # sauvegarder maintenant
+
+# développement
+docker compose -f docker-compose.dev.yml exec app mix run -e 'Quotor.Backup.restore("quotor-20261113-020000.tar") |> IO.inspect()'
+```
+
+Redémarrez ensuite l'application. Une archive téléchargée depuis l'admin se restaure après
+`docker cp archive.tar <conteneur>:/tmp/`. Avec un stockage S3, les médias de l'archive sont
+renvoyés dans le bucket des médias.
+
+En complément, Neon garde son propre historique (restauration à un instant donné, durée selon
+l'offre).
+
+---
+
 ## Architecture
 
 ```
-Admin : URL YouTube / fichier          Cron 04:00 UTC : chaînes suivies activées
-              │                                         │
-              └──────────────┬──────────────────────────┘
-                             ▼
-   IngestSource  (file Oban "ingest", 1 à la fois)
-     yt-dlp : vidéo ≤ 480p + sous-titres FR (manuels, sinon automatiques)
-     → analyse VTT/SRT, découpage en phrases, mots horodatés
-                             ▼
-   CutSource  (file "media", 2 en parallèle)
-     ffmpeg : un clip mp4 (H.264/AAC) + une vignette par quote
-     → la vidéo source est ensuite supprimée
-                             ▼
-   Recherche plein texte Postgres (tsvector « simple » + pg_trgm)
-   Montage : plan glouton sur les mots horodatés → ffmpeg concat
+        ┌──────────── nœud web (ROLE=web) ────────────┐
+        │ site LiveView, recherche, montages          │
+        │ admin : URL YouTube / fichier ─► file Oban  │
+        └──────────────┬──────────────────────────────┘
+                       │ tâches en file (PostgreSQL)
+        ┌──────────────▼── nœud(s) worker (ROLE=worker) ─────────────┐
+        │ IngestSource (file "ingest")                               │
+        │   yt-dlp : vidéo ≤ 480p + sous-titres FR → quotes, mots    │
+        │ CutSource (file "media", WORKER_MEDIA_CONCURRENCY)         │
+        │   ffmpeg : un clip mp4 + une vignette par quote            │
+        │ Cron 04:00 UTC : chaînes suivies ; 03:30 : nettoyage       │
+        │ Cron 02:00 UTC : sauvegarde (pg_dump + médias) ─► bucket   │
+        │   privé BACKUP_S3_BUCKET, ou dossier BACKUP_DIR            │
+        └──────────────┬─────────────────────────────────────────────┘
+                       ▼
+     Stockage objet S3 / R2 (clips, vignettes, montages, sources)
+            ▲ lu directement par les navigateurs (bucket public)
+            │ ou relayé par le site sous /media/… (bucket privé)
 ```
+
+- Recherche : plein texte PostgreSQL (tsvector « simple » et pg_trgm).
+- Montage : plan glouton sur les mots horodatés, puis concaténation par ffmpeg sur le nœud web, à
+  partir des clips mis en cache localement.
+- En mode `ROLE=all` avec stockage local, tout tourne dans un seul conteneur.
 
 | Dossier | Contenu |
 | --- | --- |
@@ -308,19 +458,21 @@ Admin : URL YouTube / fichier          Cron 04:00 UTC : chaînes suivies activé
 | `lib/quotor/ingest/` | téléchargement (yt-dlp), analyse des sous-titres, segmentation |
 | `lib/quotor/search.ex` | recherche standard et plan de montage |
 | `lib/quotor/montages.ex` | rendu et cache des montages |
-| `lib/quotor/workers/` | tâches Oban (ingestion, découpe, synchronisation des chaînes, nettoyage) |
+| `lib/quotor/media.ex`, `lib/quotor/storage/` | accès aux fichiers : disque local ou S3/R2 (signature SigV4 via Req), cache local |
+| `lib/quotor/workers/` | tâches Oban (ingestion, découpe, synchronisation des chaînes, nettoyage, sauvegarde) |
+| `lib/quotor/backup.ex` | sauvegarde et restauration (pg_dump / pg_restore, archive tar des médias) |
 | `lib/quotor/logs.ex`, `monitoring.ex` | buffer de logs, indicateurs de supervision |
 | `lib/quotor_web/live/` | pages LiveView publiques et admin |
 | `docker/entrypoint.sh` | PostgreSQL interne, secret, migrations, démarrage |
 
-Les fichiers médias sont servis par `/media/…` avec prise en charge des requêtes `Range`
-(nécessaire à la lecture vidéo sur Safari et iOS).
+En stockage local ou avec un bucket privé, les fichiers médias sont servis par `/media/…`, avec
+prise en charge des requêtes `Range` (nécessaire à la lecture vidéo sur Safari et iOS).
 
 ---
 
 ## Tests et CI
 
-191 tests couvrent :
+211 tests couvrent :
 
 - l'analyse des sous-titres (y compris le format mot à mot de YouTube) et la segmentation ;
 - la recherche et le plan de montage ;
@@ -332,9 +484,15 @@ Les fichiers médias sont servis par `/media/…` avec prise en charge des requ�
 - les mentions de propriété (pied de page, mentions légales) ;
 - les pages légales et les balises Discord ;
 - le service des médias ;
+- le stockage S3, contre un faux bucket en mémoire qui vérifie la signature des requêtes :
+  pipeline complet sans fichier restant sur le worker, envoi de fichier, relais d'un bucket privé
+  avec `Range` ;
+- les sauvegardes : vrai `pg_dump`, archive des médias, rétention, restauration depuis le disque ou
+  un bucket distinct, téléchargement réservé aux admins, noms d'archive validés ;
 - les logs.
 
-Les tests marqués `:ffmpeg` sont ignorés si ffmpeg est absent.
+Les tests marqués `:ffmpeg` (ou `:pg_dump`) sont ignorés si ffmpeg (ou le client PostgreSQL) est
+absent. La CI installe `pg_dump` 17, de la même version que le serveur.
 
 Les captures du README se régénèrent avec `scripts/screenshots.mjs` (Playwright, instructions en tête
 du fichier).
@@ -370,16 +528,26 @@ du fichier).
 
 ### Hébergement et exploitation
 
-- **Stockage sur disque local** : il faut un disque persistant (offre payante Render). Il n'y a pas
-  encore de stockage objet (S3/R2) ni de CDN.
-- **Une seule instance** : médias sur disque, limiteur de débit et buffer de logs en mémoire. Pas de
-  mise à l'échelle horizontale en l'état.
+- **Les montages sont rendus par le site**, pas par les workers : pendant un rendu, le nœud web
+  consomme du CPU, et télécharge les clips depuis le bucket s'ils ne sont pas en cache.
+- **La découpe d'une vidéo se fait sur un seul worker** : plusieurs workers traitent plusieurs vidéos
+  en parallèle, mais une vidéo n'est pas répartie entre eux.
+- **Un seul nœud web** : le limiteur de débit et le buffer de logs sont en mémoire, propres à chaque
+  nœud. Plusieurs nœuds web fonctionneraient, mais sans limite de débit commune.
+- **Sans stockage S3**, il faut un disque persistant (offre payante Render) et un seul conteneur :
+  les rôles `web`/`worker` séparés supposent un stockage partagé.
+- **Derrière un pooler** (`DATABASE_POOLER=true`), les workers ne reçoivent pas de notification
+  immédiate et découvrent les nouvelles tâches par interrogation, avec quelques secondes de délai.
 - **Neon** : Oban interroge la base en continu, ce qui l'empêche de se mettre en veille et consomme
   des heures de calcul.
-- **Render gratuit** : le service s'endort après 15 min d'inactivité. La synchronisation nocturne
-  des chaînes ne s'exécute pas s'il dort.
+- **Render gratuit** : le site s'endort après 15 min d'inactivité. Les workers Render sont toujours
+  payants ; un worker chez soi est l'alternative gratuite.
 - **Logs** : le buffer admin est perdu au redémarrage, et il n'y a pas d'alerting externe (Sentry,
   Prometheus…).
+- **Sauvegardes** : chaque archive est complète (pas d'incrémental) et non chiffrée, d'où un
+  bucket privé. En S3, les médias ne sont pas inclus par défaut : `BACKUP_MEDIA=always` les
+  télécharge tous à chaque sauvegarde, ce qui devient lourd quand le catalogue grossit. La
+  restauration se fait en ligne de commande, pas depuis l'interface.
 - L'image Docker pèse environ 1,2 Go (ffmpeg et PostgreSQL inclus).
 - En local, l'image de production n'est accessible que via `localhost` : `force_ssl` redirige les
   autres hôtes vers HTTPS.

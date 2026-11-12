@@ -56,7 +56,7 @@ RUN apt-get update -y \
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
 
 RUN useradd --create-home --uid 1000 quotor \
-    && mkdir -p /data && chown quotor:quotor /data
+    && mkdir -p /data /backups && chown quotor:quotor /data /backups
 
 WORKDIR /app
 COPY --from=builder --chown=quotor:quotor /app/_build/prod/rel/quotor ./
@@ -73,7 +73,8 @@ ENV MIX_ENV=prod \
 VOLUME ["/data"]
 EXPOSE 4000
 
+# Un worker (ROLE=worker) n'a pas de serveur HTTP : il est considéré sain s'il tourne.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s \
-  CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
+  CMD [ "${ROLE:-all}" = "worker" ] || curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint.sh"]

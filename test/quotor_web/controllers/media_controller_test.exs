@@ -1,10 +1,9 @@
 defmodule QuotorWeb.MediaControllerTest do
   use QuotorWeb.ConnCase, async: false
 
-  alias Quotor.Media
-
   setup do
-    path = Media.prepare!("clips/test/sample.mp4")
+    path = Quotor.Storage.Local.path("clips/test/sample.mp4")
+    File.mkdir_p!(Path.dirname(path))
     File.write!(path, "0123456789")
     on_exit(fn -> File.rm(path) end)
     :ok
@@ -30,8 +29,8 @@ defmodule QuotorWeb.MediaControllerTest do
     assert again.status == 304
 
     # fichier régénéré : nouvel ETag, contenu renvoyé
-    File.write!(Quotor.Media.abs_path("clips/test/sample.mp4"), "nouvelle version")
-    File.touch!(Quotor.Media.abs_path("clips/test/sample.mp4"), System.os_time(:second) + 10)
+    File.write!(Quotor.Storage.Local.path("clips/test/sample.mp4"), "nouvelle version")
+    File.touch!(Quotor.Storage.Local.path("clips/test/sample.mp4"), System.os_time(:second) + 10)
 
     changed =
       build_conn() |> put_req_header("if-none-match", etag) |> get("/media/clips/test/sample.mp4")

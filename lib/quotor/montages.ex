@@ -83,26 +83,33 @@ defmodule Quotor.Montages do
   end
 
   defp render(%Montage{status: "ready", file_path: path} = montage) when is_binary(path) do
-    if File.exists?(Media.abs_path(path)), do: {:ok, montage}, else: do_render(montage)
+    if Media.exists?(path), do: {:ok, montage}, else: do_render(montage)
   end
 
   defp render(%Montage{} = montage), do: do_render(montage)
 
   defp do_render(%Montage{} = montage) do
     rel = Media.montage_rel(montage.key)
-    out = Media.prepare!(rel)
-
-    parts =
-      Enum.map(montage.segments, fn seg ->
-        {Media.abs_path(seg["clip_path"]), seg["offset_ms"], seg["duration_ms"]}
-      end)
-
+    workdir = Media.tmp_dir!("montage-#{montage.key}-#{System.unique_integer([:positive])}")
+    out = Path.join(workdir, "montage.mp4")
     started = System.monotonic_time(:millisecond)
 
-    case Ffmpeg.concat(parts, out) do
-      {:ok, _} ->
+    # Les clips sont pris dans le cache local (ou téléchargés depuis le stockage).
+    result =
+      try do
+        with {:ok, parts} <- local_parts(montage.segments),
+             {:ok, _} <- Ffmpeg.concat(parts, out),
+             :ok <- Media.store(out, rel) do
+          :ok
+        end
+      after
+        File.rm_rf(workdir)
+      end
+
+    case result do
+      :ok ->
         Logger.info(
-          "montage #{montage.key} rendu (#{length(parts)} segments, #{System.monotonic_time(:millisecond) - started} ms)"
+          "montage #{montage.key} rendu (#{length(montage.segments)} segments, #{System.monotonic_time(:millisecond) - started} ms)"
         )
 
         montage
@@ -110,6 +117,7 @@ defmodule Quotor.Montages do
         |> Repo.update()
 
       {:error, msg} ->
+        msg = if is_binary(msg), do: msg, else: inspect(msg)
         Logger.error("montage #{montage.key} en échec : #{msg}")
 
         montage
@@ -117,6 +125,19 @@ defmodule Quotor.Montages do
         |> Repo.update()
 
         {:error, "Le rendu du montage a échoué."}
+    end
+  end
+
+  defp local_parts(segments) do
+    Enum.reduce_while(segments, {:ok, []}, fn seg, {:ok, acc} ->
+      case Media.fetch(seg["clip_path"]) do
+        {:ok, path} -> {:cont, {:ok, [{path, seg["offset_ms"], seg["duration_ms"]} | acc]}}
+        {:error, reason} -> {:halt, {:error, "clip #{seg["clip_path"]} : #{inspect(reason)}"}}
+      end
+    end)
+    |> case do
+      {:ok, parts} -> {:ok, Enum.reverse(parts)}
+      error -> error
     end
   end
 

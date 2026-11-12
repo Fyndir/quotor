@@ -1,0 +1,37 @@
+# Auto-hébergement en un seul conteneur (image de production, ROLE=all) :
+#
+#   docker compose up -d --build
+#
+# Sans DATABASE_URL, PostgreSQL tourne dans le conteneur. Base, médias et clé
+# secrète sont dans le volume nommé `quotor_data` (/data), indépendant du
+# conteneur : mises à jour (`up -d --build`), `down` et redémarrages ne perdent
+# rien. Seul `docker compose down -v` (ou `docker volume rm quotor_data`) l'efface.
+#
+# Sauvegarde :
+#   docker run --rm -v quotor_data:/data -v "$PWD":/backup alpine tar czf /backup/quotor-data.tgz -C /data .
+name: quotor-prod
+
+services:
+  quotor:
+    build: .
+    image: quotor:latest
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      PHX_HOST: ${PHX_HOST:-localhost}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@quotor.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-please}
+      # Base externe (Neon…) : décommentez ; les médias restent dans le volume.
+      # DATABASE_URL: ${DATABASE_URL}
+      # Sauvegardes sur un volume distinct des données (cf. /admin/sauvegardes)
+      BACKUP_DIR: /backups
+    volumes:
+      - data:/data
+      - backups:/backups
+
+volumes:
+  data:
+    name: quotor_data
+  backups:
+    name: quotor_backups_prod

@@ -1,7 +1,47 @@
 # Blueprint Render : https://render.com/docs/blueprint-spec
-# La base de données est hébergée sur Neon : renseigner DATABASE_URL dans le
-# dashboard Render (chaîne de connexion Neon, de préférence l'hôte direct,
-# sans "-pooler", avec ?sslmode=require).
+#
+# Deux services construits depuis la même image Docker :
+#   - quotor        (ROLE=web)    : le site, sans traitement lourd
+#   - quotor-worker (ROLE=worker) : téléchargement, découpe ffmpeg, tâches planifiées
+# Base de données : Neon. Médias : Cloudflare R2 (ou tout stockage S3).
+# Les valeurs marquées `sync: false` sont à saisir dans le tableau de bord Render.
+
+envVarGroups:
+  - name: quotor-shared
+    envVars:
+      # Neon : chaîne de connexion directe (hôte sans "-pooler"), ?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY_BASE
+        generateValue: true
+      - key: POOL_SIZE
+        value: "5"
+      # Cloudflare R2 : https://<ID-compte>.r2.cloudflarestorage.com
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_BUCKET
+        value: quotor
+      - key: S3_REGION
+        value: auto
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      # Facultatif : URL publique du bucket (domaine r2.dev ou personnalisé).
+      # Sans elle, le site relaie les fichiers d'un bucket privé.
+      - key: S3_PUBLIC_URL
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # Sauvegardes nocturnes (base + médias) vers un bucket R2 PRIVÉ, distinct de
+      # celui des médias. Sans lui, elles iraient sur le disque éphémère du worker.
+      - key: BACKUP_S3_BUCKET
+        value: quotor-backups
+      - key: BACKUP_KEEP
+        value: "14"
+
 services:
   - type: web
     name: quotor
@@ -12,16 +52,9 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: SECRET_KEY_BASE
-        generateValue: true
-      - key: ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
-      - key: POOL_SIZE
-        value: "5"
+      - fromGroup: quotor-shared
+      - key: ROLE
+        value: web
       - key: LEGAL_EDITOR_NAME
         sync: false
       - key: LEGAL_EDITOR_ADDRESS
@@ -30,12 +63,21 @@ services:
         sync: false
       - key: LEGAL_PUBLICATION_DIRECTOR
         sync: false
-      # Facultatif : cookies YouTube (fichier secret Render) si YouTube bloque l'IP
+
+  - type: worker
+    name: quotor-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: frankfurt
+    autoDeploy: true
+    envVars:
+      - fromGroup: quotor-shared
+      - key: ROLE
+        value: worker
+      # Découpes ffmpeg en parallèle sur ce worker (≈ nombre de cœurs)
+      - key: WORKER_MEDIA_CONCURRENCY
+        value: "2"
+      # Facultatif : cookies YouTube (Secret File Render) si YouTube bloque l'IP
       # - key: YTDLP_COOKIES
       #   value: /etc/secrets/cookies.txt
-    # Disque persistant pour les clips (sinon perdus à chaque redéploiement).
-    # Nécessite une offre payante ; supprimer ce bloc pour l'offre gratuite.
-    disk:
-      name: quotor-data
-      mountPath: /data
-      sizeGB: 10

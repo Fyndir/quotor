@@ -7,7 +7,7 @@ defmodule QuotorWeb.Admin.AdminTest do
 
   alias Quotor.{Accounts, Catalog}
 
-  @pages ~w(/admin /admin/sources /admin/chaines /admin/quotes /admin/signalements /admin/utilisateurs /admin/logs)
+  @pages ~w(/admin /admin/sources /admin/chaines /admin/quotes /admin/signalements /admin/utilisateurs /admin/logs /admin/sauvegardes)
 
   describe "contrôle d'accès" do
     test "un anonyme est redirigé vers l'accueil", %{conn: conn} do

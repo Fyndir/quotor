@@ -1,4 +1,11 @@
 # Environnement de développement : docker compose -f docker-compose.dev.yml up
+#
+# Les données vivent dans des volumes nommés, indépendants des conteneurs et du
+# dossier du projet : `quotor_media` (clips, vignettes, montages, sources),
+# `quotor_pgdata_dev` (base) et `quotor_backups` (sauvegardes, cf.
+# /admin/sauvegardes). Ils survivent à `down`, `up --build` et à la recréation
+# des conteneurs ; seul `docker compose down -v` (ou `docker volume rm …`) les
+# efface.
 services:
   db:
     image: postgres:17
@@ -21,11 +28,13 @@ services:
     command: sh -c "mix setup && mix phx.server"
     environment:
       DB_HOST: db
-      MEDIA_DIR: /app/priv/media
+      MEDIA_DIR: /data/media
     ports:
       - "4000:4000"
     volumes:
       - .:/app
+      - media:/data/media
+      - backups:/data/backups
       - deps:/app/deps
       - build:/app/_build
       - mix_home:/root/.mix
@@ -34,7 +43,13 @@ services:
         condition: service_healthy
 
 volumes:
+  # Noms fixes : indépendants du nom du projet compose.
   pgdata_dev:
+    name: quotor_pgdata_dev
+  media:
+    name: quotor_media
+  backups:
+    name: quotor_backups
   deps:
   build:
   mix_home:

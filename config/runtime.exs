@@ -31,6 +31,74 @@ if config_env() != :test and media_dir do
   config :quotor, :media_dir, media_dir
 end
 
+# Stockage objet S3 / Cloudflare R2 (sinon : disque local sous MEDIA_DIR).
+# Indispensable si le site et les workers tournent sur des machines différentes.
+s3_bucket = System.get_env("S3_BUCKET", "")
+backup_bucket = System.get_env("BACKUP_S3_BUCKET", "")
+
+if config_env() != :test and s3_bucket != "" do
+  config :quotor, :storage, :s3
+end
+
+# Identifiants S3 : pour les médias (S3_BUCKET) et/ou les sauvegardes (BACKUP_S3_BUCKET).
+if config_env() != :test and (s3_bucket != "" or backup_bucket != "") do
+  config :quotor, :s3,
+    bucket: s3_bucket,
+    endpoint:
+      System.get_env("S3_ENDPOINT") ||
+        raise("S3_ENDPOINT manquant (ex. https://<compte>.r2.cloudflarestorage.com)"),
+    region: System.get_env("S3_REGION", "auto"),
+    access_key_id: System.fetch_env!("S3_ACCESS_KEY_ID"),
+    secret_access_key: System.fetch_env!("S3_SECRET_ACCESS_KEY"),
+    public_url: System.get_env("S3_PUBLIC_URL")
+end
+
+# Sauvegardes (base + médias), cf. Quotor.Backup. Destination : bucket privé
+# BACKUP_S3_BUCKET s'il est défini, sinon le dossier BACKUP_DIR.
+if config_env() != :test do
+  backup =
+    [
+      enabled: System.get_env("BACKUP_ENABLED", "true") not in ~w(false 0),
+      keep: String.to_integer(System.get_env("BACKUP_KEEP", "7")),
+      media:
+        case System.get_env("BACKUP_MEDIA", "auto") do
+          "always" -> :always
+          "never" -> :never
+          "auto" -> :auto
+          other -> raise "BACKUP_MEDIA invalide : #{inspect(other)} (auto, always ou never)"
+        end
+    ] ++
+      if(dir = System.get_env("BACKUP_DIR"), do: [dir: dir], else: []) ++
+      if(backup_bucket != "", do: [s3_bucket: backup_bucket], else: [])
+
+  config :quotor, :backup, backup
+end
+
+# Rôle du nœud :
+#   all    — site + tâches de fond (défaut, une seule machine)
+#   web    — site uniquement : les tâches sont mises en file, pas exécutées
+#   worker — tâches de fond uniquement (alimentation, découpe), sans serveur HTTP
+role = System.get_env("ROLE", "all")
+
+unless role in ~w(all web worker) do
+  raise "ROLE invalide : #{inspect(role)} (attendu : all, web ou worker)"
+end
+
+config :quotor, :role, String.to_atom(role)
+
+if role == "web" and config_env() != :test do
+  # `false` et non `[]` : la configuration fusionne les listes, `[]` ne remplacerait rien
+  config :quotor, Oban, queues: false
+end
+
+if role == "worker" do
+  config :quotor, QuotorWeb.Endpoint, server: false
+
+  if concurrency = System.get_env("WORKER_MEDIA_CONCURRENCY") do
+    config :quotor, Oban, queues: [default: 5, ingest: 1, media: String.to_integer(concurrency)]
+  end
+end
+
 if System.get_env("KEEP_SOURCES") in ~w(true 1) do
   config :quotor, :keep_sources, true
 end
@@ -92,6 +160,13 @@ if config_env() == :prod do
     # Compatible avec le pooler Neon (PgBouncer en mode transaction)
     prepare: if(System.get_env("DATABASE_POOLER") in ~w(true 1), do: :unnamed, else: :named),
     socket_options: maybe_ipv6
+
+  # Notifications entre nœuds (site → workers) : LISTEN/NOTIFY PostgreSQL,
+  # sauf derrière un pooler en mode transaction, qui ne le supporte pas
+  # (les workers découvrent alors les nouvelles tâches par interrogation).
+  unless System.get_env("DATABASE_POOLER") in ~w(true 1) do
+    config :quotor, Oban, notifier: Oban.Notifiers.Postgres
+  end
 
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||

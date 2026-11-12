@@ -40,8 +40,29 @@ defmodule Quotor.Monitoring do
       otp: to_string(:erlang.system_info(:otp_release)),
       elixir: System.version(),
       version: Application.spec(:quotor, :vsn) |> to_string(),
-      node: to_string(node())
+      node: to_string(node()),
+      role: Application.get_env(:quotor, :role, :all),
+      storage: storage_label(),
+      queues: local_queues()
     }
+  end
+
+  defp storage_label do
+    if Quotor.Storage.local?() do
+      "disque local"
+    else
+      s3 = Application.get_env(:quotor, :s3, [])
+      mode = if s3[:public_url] in [nil, ""], do: "privé, relayé", else: "public"
+      "S3 · #{s3[:bucket]} (#{mode})"
+    end
+  end
+
+  # Files Oban exécutées par ce nœud (vide pour un nœud « web »)
+  defp local_queues do
+    Oban.config().queues
+    |> Enum.map(fn {queue, opts} -> {queue, opts[:limit] || opts} end)
+  rescue
+    _ -> []
   end
 
   def database do

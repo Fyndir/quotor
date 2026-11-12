@@ -52,5 +52,12 @@ defmodule QuotorWeb.OpenGraph do
 
   @doc "URL absolue d'un fichier média (ou nil)."
   def absolute(nil), do: nil
-  def absolute(rel), do: QuotorWeb.Endpoint.url() <> Media.url(rel)
+
+  def absolute(rel) do
+    case Media.url(rel) do
+      # URL publique du bucket (déjà absolue)
+      "http" <> _ = url -> url
+      path -> QuotorWeb.Endpoint.url() <> path
+    end
+  end
 end

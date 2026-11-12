@@ -48,15 +48,15 @@ defmodule Quotor.IngestTest do
     assert Enum.all?(quotes, &(&1.status == "ready"))
 
     for q <- quotes do
-      assert File.exists?(Media.abs_path(q.clip_path))
-      assert File.exists?(Media.abs_path(q.thumb_path))
+      assert File.exists?(Quotor.Storage.Local.path(q.clip_path))
+      assert File.exists?(Quotor.Storage.Local.path(q.thumb_path))
     end
 
     # Mode avancé : « bonjour » + « on teste un jeu pourri »
     assert {:ok, montage} = Montages.build("bonjour on teste un jeu pourri", nil)
     assert montage.status == "ready"
     assert length(montage.segments) == 2
-    assert File.exists?(Media.abs_path(montage.file_path))
+    assert File.exists?(Quotor.Storage.Local.path(montage.file_path))
 
     # même phrase, mêmes extraits : montage en cache
     assert {:ok, again} = Montages.build("Bonjour, on teste un jeu pourri !", nil)

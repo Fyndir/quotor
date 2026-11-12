@@ -102,9 +102,14 @@ config :quotor, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"0 4 * * *", Quotor.Workers.SyncChannels},
-       {"30 3 * * *", Quotor.Workers.Cleanup}
+       {"30 3 * * *", Quotor.Workers.Cleanup},
+       {"0 2 * * *", Quotor.Workers.Backup}
      ]}
   ]
+
+# Sauvegardes : une par nuit (2 h UTC), les `keep` plus récentes sont gardées.
+# media: :auto inclut les médias s'ils sont sur disque local (pas en S3/R2).
+config :quotor, :backup, enabled: true, keep: 7, media: :auto
 
 # Auteur et titulaire des droits sur le logiciel Quotor (code, concept, design)
 config :quotor, :owner, name: "Antoine Gamain", since: 2026

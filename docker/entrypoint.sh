@@ -14,6 +14,11 @@ log() { echo "[quotor] $*"; }
 
 EMBEDDED_PG=0
 
+if [ -z "${DATABASE_URL:-}" ] && [ "${ROLE:-all}" != "all" ]; then
+  log "ROLE=${ROLE} nécessite une base partagée : définissez DATABASE_URL"
+  exit 1
+fi
+
 if [ -z "${DATABASE_URL:-}" ]; then
   EMBEDDED_PG=1
   PG_BIN=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -n 1)

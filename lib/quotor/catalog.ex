@@ -172,11 +172,10 @@ defmodule Quotor.Catalog do
 
   @doc "Supprime une source, ses quotes et tous les fichiers associés."
   def delete_source(%Source{} = source) do
-    Media.delete_dir("clips/#{source.id}")
-    Media.delete_dir("thumbs/#{source.id}")
+    Media.delete_prefix("clips/#{source.id}")
+    Media.delete_prefix("thumbs/#{source.id}")
     Media.delete(source.file_path)
     Media.delete(source.subtitle_path)
-    Media.delete_dir("tmp/source-#{source.id}")
     Repo.delete(source) |> tap_broadcast()
   end
 
@@ -361,8 +360,8 @@ defmodule Quotor.Catalog do
       length(segments)
     end)
     |> tap(fn _ ->
-      Media.delete_dir("clips/#{source.id}")
-      Media.delete_dir("thumbs/#{source.id}")
+      Media.delete_prefix("clips/#{source.id}")
+      Media.delete_prefix("thumbs/#{source.id}")
     end)
   end
 

@@ -150,6 +150,18 @@ defmodule Quotor.Accounts do
         |> User.confirm_changeset()
         |> Ecto.Changeset.put_change(:role, "admin")
         |> Repo.insert()
+        |> case do
+          # Plusieurs nœuds (site + workers) démarrent en même temps : un autre
+          # vient de créer le compte, on se contente de le promouvoir.
+          {:error, changeset} ->
+            case get_user_by_email(email) do
+              %User{} = user -> set_user_role(user, "admin")
+              nil -> {:error, changeset}
+            end
+
+          ok ->
+            ok
+        end
 
       %User{} = user ->
         set_user_role(user, "admin")

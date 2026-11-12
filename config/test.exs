@@ -49,3 +49,6 @@ config :quotor, Oban, testing: :manual
 # Médias de test dans un dossier temporaire, téléchargeur factice
 config :quotor, :media_dir, Path.join(System.tmp_dir!(), "quotor_test_media")
 config :quotor, :downloader, Quotor.FakeDownloader
+
+# Sauvegardes de test dans un dossier temporaire dédié
+config :quotor, :backup, dir: Path.join(System.tmp_dir!(), "quotor_test_backups")

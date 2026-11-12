@@ -56,7 +56,8 @@ defmodule QuotorWeb.Layouts do
         {:authors, ~p"/admin/auteurs", "hero-user-group", "Auteurs"},
         {:reports, ~p"/admin/signalements", "hero-flag", "Signalements"},
         {:users, ~p"/admin/utilisateurs", "hero-users", "Utilisateurs"},
-        {:logs, ~p"/admin/logs", "hero-command-line", "Logs"}
+        {:logs, ~p"/admin/logs", "hero-command-line", "Logs"},
+        {:backups, ~p"/admin/sauvegardes", "hero-archive-box", "Sauvegardes"}
       ])
 
     ~H"""

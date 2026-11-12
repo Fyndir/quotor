@@ -1,22 +1,67 @@
 defmodule QuotorWeb.MediaController do
   @moduledoc """
-  Sert les fichiers médias depuis `MEDIA_DIR`, avec prise en charge des
-  requêtes `Range` (indispensable à la lecture vidéo sur Safari / iOS).
+  Sert les fichiers médias publics (clips, vignettes, montages), avec prise
+  en charge des requêtes `Range` (indispensable à la lecture vidéo sur
+  Safari / iOS).
+
+    * stockage local : envoi du fichier depuis `MEDIA_DIR` ;
+    * stockage S3 sans URL publique (bucket privé) : l'objet est relayé depuis
+      le bucket. Avec une URL publique, les pages pointent directement vers le
+      bucket et ce contrôleur n'est pas sollicité.
   """
   use QuotorWeb, :controller
 
-  alias Quotor.Media
+  alias Quotor.{Media, Storage}
 
   @public_dirs ~w(clips thumbs montages)
+  # (content-length est recalculé par le serveur)
+  @relayed_headers ~w(content-type content-range accept-ranges etag last-modified)
 
   def show(conn, %{"path" => [dir | _] = segments}) when dir in @public_dirs do
-    case Media.resolve(segments) do
-      {:ok, path} -> send_media(conn, path)
-      :error -> send_resp(conn, 404, "Not found")
+    cond do
+      Storage.local?() ->
+        case Media.resolve(segments) do
+          {:ok, path} -> send_media(conn, path)
+          :error -> send_resp(conn, 404, "Not found")
+        end
+
+      Enum.any?(segments, &(&1 in ["", ".", ".."])) ->
+        send_resp(conn, 404, "Not found")
+
+      true ->
+        relay(conn, Enum.join(segments, "/"))
     end
   end
 
   def show(conn, _params), do: send_resp(conn, 404, "Not found")
+
+  defp relay(conn, key) do
+    headers =
+      for name <- ["range", "if-none-match"],
+          value <- get_req_header(conn, name),
+          do: {name, value}
+
+    case Storage.S3.fetch_for_proxy(key, headers) do
+      {:ok, %Req.Response{status: status} = resp} when status in [200, 206, 304, 416] ->
+        conn =
+          Enum.reduce(@relayed_headers, conn, fn name, conn ->
+            case Req.Response.get_header(resp, name) do
+              [value | _] -> put_resp_header(conn, name, value)
+              [] -> conn
+            end
+          end)
+
+        conn
+        |> put_resp_header("cache-control", "public, no-cache")
+        |> send_resp(status, if(status == 304, do: "", else: resp.body))
+
+      {:ok, %Req.Response{status: status}} when status in [403, 404] ->
+        send_resp(conn, 404, "Not found")
+
+      _ ->
+        send_resp(conn, 502, "Stockage indisponible")
+    end
+  end
 
   defp send_media(conn, path) do
     %File.Stat{size: size, mtime: mtime} = File.stat!(path, time: :posix)

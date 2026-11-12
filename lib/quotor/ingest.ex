@@ -43,17 +43,11 @@ defmodule Quotor.Ingest do
       |> Map.new(fn {k, v} -> {to_string(k), v} end)
       |> Map.merge(%{"file_path" => placeholder, "submitted_by_id" => Scope.user_id(scope)})
 
-    with {:ok, source} <- Catalog.create_upload_source(attrs) do
-      video_rel = Media.source_rel(source.id, ext(video_path, ".mp4"))
-      move!(video_path, Media.prepare!(video_rel))
-
-      sub_rel =
-        if subtitle_path do
-          rel = Media.source_rel(source.id, ext(subtitle_path, ".vtt"))
-          move!(subtitle_path, Media.prepare!(rel))
-          rel
-        end
-
+    # Les fichiers sont rangés dans le stockage partagé : la vidéo pourra être
+    # traitée par un worker sur une autre machine que le site.
+    with {:ok, source} <- Catalog.create_upload_source(attrs),
+         {:ok, video_rel} <- store_source_file(source, video_path, ".mp4"),
+         {:ok, sub_rel} <- store_source_file(source, subtitle_path, ".vtt") do
       {:ok, source} =
         Catalog.update_source(source, %{file_path: video_rel, subtitle_path: sub_rel})
 
@@ -89,6 +83,7 @@ defmodule Quotor.Ingest do
              {:ok, source} <- ensure_author(source),
              {:ok, sub_path} <- subtitle_file(source),
              {:ok, parsed} <- Subtitles.parse_file(sub_path),
+             :ok <- Media.evict(source.subtitle_path),
              segments when segments != [] <- Segmenter.segment(parsed) do
           duration = probe_duration(source)
           {:ok, count} = Catalog.replace_quotes(source, segments, duration)
@@ -117,17 +112,11 @@ defmodule Quotor.Ingest do
     workdir = Media.tmp_dir!("source-#{source.id}")
 
     try do
-      with {:ok, fetched} <- Downloader.impl().fetch(source.url, workdir) do
-        video_rel = Media.source_rel(source.id, ext(fetched.video_path, ".mp4"))
-        move!(fetched.video_path, Media.prepare!(video_rel))
-
-        sub_rel =
-          if fetched.subtitle_path do
-            rel = Media.source_rel(source.id, ext(fetched.subtitle_path, ".vtt"))
-            move!(fetched.subtitle_path, Media.prepare!(rel))
-            rel
-          end
-
+      with {:ok, fetched} <- Downloader.impl().fetch(source.url, workdir),
+           # la découpe peut avoir lieu sur un autre worker : la vidéo va au stockage
+           {:ok, video_rel} <-
+             store_source_file(source, fetched.video_path, ".mp4", keep_local: true),
+           {:ok, sub_rel} <- store_source_file(source, fetched.subtitle_path, ".vtt") do
         meta = fetched.metadata || %{}
 
         Catalog.update_source(source, %{
@@ -164,13 +153,18 @@ defmodule Quotor.Ingest do
   defp subtitle_file(%Source{subtitle_path: nil}), do: {:error, :no_subtitles}
 
   defp subtitle_file(%Source{subtitle_path: rel}) do
-    path = Media.abs_path(rel)
-    if File.exists?(path), do: {:ok, path}, else: {:error, :no_subtitles}
+    case Media.fetch(rel) do
+      {:ok, path} -> {:ok, path}
+      {:error, :not_found} -> {:error, :no_subtitles}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp probe_duration(%Source{file_path: rel}) when is_binary(rel) do
-    case Ffmpeg.duration_ms(Media.abs_path(rel)) do
-      {:ok, ms} -> ms
+    with {:ok, path} <- Media.fetch(rel),
+         {:ok, ms} <- Ffmpeg.duration_ms(path) do
+      ms
+    else
       _ -> nil
     end
   end
@@ -187,48 +181,41 @@ defmodule Quotor.Ingest do
 
       %Source{file_path: rel} = source ->
         Logger.metadata(source_id: source.id)
-        input = rel && Media.abs_path(rel)
 
-        if input && File.exists?(input) do
-          do_cut(source, input)
-        else
-          # Le fichier a disparu (disque éphémère, redémarrage…) : on recommence.
-          Logger.warning("source #{source.id} : vidéo absente, nouveau téléchargement")
-          {:ok, _} = retry(source)
-          :ok
+        # En mode S3, la vidéo est téléchargée depuis le stockage si ce worker
+        # ne l'a pas déjà (cache local).
+        case Media.fetch(rel) do
+          {:ok, input} ->
+            do_cut(source, input)
+
+          {:error, :not_found} ->
+            # Vidéo disparue (disque éphémère, purge…) : on recommence tout.
+            Logger.warning("source #{source.id} : vidéo absente, nouveau téléchargement")
+            {:ok, _} = retry(source)
+            :ok
+
+          {:error, reason} ->
+            # Stockage momentanément indisponible : Oban réessaiera.
+            {:error, inspect_reason(reason)}
         end
     end
   end
 
   defp do_cut(source, input) do
     quotes = Catalog.pending_quotes_for_source(source.id)
+    workdir = Media.tmp_dir!("cut-#{source.id}-#{System.unique_integer([:positive])}")
 
     failures =
-      Enum.count(quotes, fn quote ->
-        clip_rel = Media.clip_rel(source.id, quote.id)
-        thumb_rel = Media.thumb_rel(source.id, quote.id)
-        clip = Media.prepare!(clip_rel)
-        duration = quote.clip_end_ms - quote.clip_start_ms
-
-        with {:ok, _} <- Ffmpeg.cut_clip(input, quote.clip_start_ms, duration, clip),
-             {:ok, _} <- Ffmpeg.thumbnail(clip, div(duration, 2), Media.prepare!(thumb_rel)) do
-          Catalog.update_quote_media(quote, %{
-            status: "ready",
-            clip_path: clip_rel,
-            thumb_path: thumb_rel
-          })
-
-          false
-        else
-          {:error, _msg} ->
-            Catalog.update_quote_media(quote, %{status: "failed"})
-            true
-        end
-      end)
+      try do
+        Enum.count(quotes, &(cut_quote(source, input, &1, workdir) == :error))
+      after
+        File.rm_rf(workdir)
+      end
 
     if failures > 0, do: Logger.warning("source #{source.id} : #{failures} découpe(s) en échec")
 
     {:ok, source} = Catalog.update_source(source, %{status: "ready", error: nil})
+    Media.evict(source.file_path)
 
     unless Application.get_env(:quotor, :keep_sources, false) or source.origin == "upload" do
       Media.delete(source.file_path)
@@ -240,6 +227,34 @@ defmodule Quotor.Ingest do
     )
 
     :ok
+  end
+
+  # Découpe une quote dans un dossier de travail local, puis range le clip et
+  # la vignette dans le stockage.
+  defp cut_quote(source, input, quote, workdir) do
+    clip_rel = Media.clip_rel(source.id, quote.id)
+    thumb_rel = Media.thumb_rel(source.id, quote.id)
+    clip = Path.join(workdir, "#{quote.id}.mp4")
+    thumb = Path.join(workdir, "#{quote.id}.jpg")
+    duration = quote.clip_end_ms - quote.clip_start_ms
+
+    with {:ok, _} <- Ffmpeg.cut_clip(input, quote.clip_start_ms, duration, clip),
+         {:ok, _} <- Ffmpeg.thumbnail(clip, div(duration, 2), thumb),
+         :ok <- Media.store(clip, clip_rel),
+         :ok <- Media.store(thumb, thumb_rel) do
+      Catalog.update_quote_media(quote, %{
+        status: "ready",
+        clip_path: clip_rel,
+        thumb_path: thumb_rel
+      })
+
+      :ok
+    else
+      {:error, msg} ->
+        Logger.warning("quote #{quote.id} : #{inspect_reason(msg)}")
+        Catalog.update_quote_media(quote, %{status: "failed"})
+        :error
+    end
   end
 
   ## Chaînes suivies
@@ -288,15 +303,19 @@ defmodule Quotor.Ingest do
     end
   end
 
-  defp move!(from, to) do
-    case File.rename(from, to) do
-      :ok ->
-        :ok
+  # Range un fichier de la source (vidéo, sous-titres) dans le stockage.
+  # `keep_local: true` garde une copie dans le cache local du worker (évite de
+  # retélécharger la vidéo juste après pour la découper).
+  defp store_source_file(source, path, default_ext, opts \\ [])
 
-      {:error, _} ->
-        File.cp!(from, to)
-        File.rm(from)
-        :ok
+  defp store_source_file(_source, nil, _default_ext, _opts), do: {:ok, nil}
+
+  defp store_source_file(source, path, default_ext, opts) do
+    rel = Media.source_rel(source.id, ext(path, default_ext))
+
+    case Media.store(path, rel, cache: Keyword.get(opts, :keep_local, false)) do
+      :ok -> {:ok, rel}
+      {:error, reason} -> {:error, reason}
     end
   end
 end

@@ -1,0 +1,69 @@
+# Architecture « production » en local : un site (ROLE=web), un ou plusieurs
+# workers (ROLE=worker), PostgreSQL et un stockage S3 local (RustFS).
+#
+#   docker compose -f docker-compose.roles.yml up --build
+#   docker compose -f docker-compose.roles.yml up --scale worker=3   # 3 workers en parallèle
+#
+# Site : http://localhost:4100 — admin : admin@quotor.local / quotor-admin-roles
+name: quotor-roles
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: quotor
+    volumes:
+      - roles_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      retries: 20
+
+  # Serveur compatible S3 local (en production : Cloudflare R2, S3…)
+  s3:
+    image: rustfs/rustfs:latest
+    environment:
+      RUSTFS_ACCESS_KEY: quotorkey
+      RUSTFS_SECRET_KEY: quotorsecret123
+    volumes:
+      - roles_s3:/data
+
+  web:
+    build: .
+    image: quotor:local
+    environment: &common
+      ROLE: web
+      DATABASE_URL: ecto://postgres:postgres@db/quotor
+      SECRET_KEY_BASE: dev-only-secret-key-base-change-me-dev-only-secret-key-base-0123456789
+      S3_ENDPOINT: http://s3:9000
+      S3_BUCKET: quotor
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: quotorkey
+      S3_SECRET_ACCESS_KEY: quotorsecret123
+      S3_CREATE_BUCKET: "true"
+      BACKUP_S3_BUCKET: quotor-backups
+      ADMIN_EMAIL: admin@quotor.local
+      ADMIN_PASSWORD: quotor-admin-roles
+    ports:
+      - "4100:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+      s3:
+        condition: service_started
+
+  worker:
+    image: quotor:local
+    environment:
+      <<: *common
+      ROLE: worker
+      WORKER_MEDIA_CONCURRENCY: "2"
+    depends_on:
+      web:
+        condition: service_started
+
+volumes:
+  roles_pgdata:
+  roles_s3:

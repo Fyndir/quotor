@@ -74,7 +74,11 @@ defmodule QuotorWeb.Router do
       live "/signalements", ReportsLive, :index
       live "/utilisateurs", UsersLive, :index
       live "/logs", LogsLive, :index
+      live "/sauvegardes", BackupsLive, :index
     end
+
+    # Téléchargement d'une archive de sauvegarde (admin uniquement)
+    get "/sauvegardes/:name", BackupController, :download
   end
 
   scope "/admin" do
