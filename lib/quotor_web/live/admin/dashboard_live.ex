@@ -38,6 +38,11 @@ defmodule QuotorWeb.Admin.DashboardLive do
           {@snap.errors_last_hour} erreur(s) dans les logs depuis une heure.
           <.link navigate={~p"/admin/logs?level=error"} class="link">Voir</.link>
         </div>
+        <div :if={@snap.catalog.to_review > 0} class="alert alert-info">
+          <.icon name="hero-exclamation-triangle" class="size-5" />
+          {@snap.catalog.to_review} quote(s) à vérifier : leur texte ne correspond pas à ce qui est dit.
+          <.link navigate={~p"/admin/quotes?review=1"} class="link">Vérifier</.link>
+        </div>
         <div :if={@snap.catalog.open_reports > 0} class="alert alert-info">
           <.icon name="hero-flag" class="size-5" />
           {@snap.catalog.open_reports} signalement(s) en attente.
@@ -95,6 +100,8 @@ defmodule QuotorWeb.Admin.DashboardLive do
             </dd>
             <dt class="text-base-content/60">Stockage</dt>
             <dd>{@snap.system.storage}</dd>
+            <dt class="text-base-content/60">Transcription vocale</dt>
+            <dd id="transcription-engine">{@snap.tools.transcription}</dd>
             <dt class="text-base-content/60">Versions</dt>
             <dd>
               Quotor {@snap.system.version} · Elixir {@snap.system.elixir} · OTP {@snap.system.otp}

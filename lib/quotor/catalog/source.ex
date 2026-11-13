@@ -3,12 +3,13 @@ defmodule Quotor.Catalog.Source do
   Vidéo source d'où sont extraites les quotes.
 
   Cycle de vie (`status`) :
-  `pending` → `downloading` → `cutting` → `ready`, ou `failed` en cas d'erreur.
+  `pending` → `downloading` → `cutting` → `refining` (affinage, si la
+  transcription vocale est active) → `ready`, ou `failed` en cas d’erreur.
   """
   use Ecto.Schema
   import Ecto.Changeset
 
-  @statuses ~w(pending downloading cutting ready failed)
+  @statuses ~w(pending downloading cutting refining ready failed)
 
   schema "sources" do
     field :origin, :string, default: "youtube"
@@ -25,6 +26,10 @@ defmodule Quotor.Catalog.Source do
     field :file_path, :string
     field :subtitle_path, :string
     field :channel_url, :string
+    # "subtitles" ou "transcription" (whisper.cpp)
+    field :text_origin, :string
+    # transcription vocale : nil, "done", "failed", "disabled"
+    field :asr_status, :string
 
     belongs_to :channel, Quotor.Catalog.Channel
     belongs_to :author, Quotor.Catalog.Author
@@ -77,7 +82,9 @@ defmodule Quotor.Catalog.Source do
       :file_path,
       :subtitle_path,
       :channel_url,
-      :author_id
+      :author_id,
+      :text_origin,
+      :asr_status
     ])
     |> validate_inclusion(:status, @statuses)
   end

@@ -20,8 +20,9 @@ defmodule QuotorWeb.Admin.SourcesLive do
         <section class="rounded-2xl bg-base-200 p-5">
           <h2 class="font-bold mb-1">Ajouter des vidéos YouTube</h2>
           <p class="text-sm text-base-content/60 mb-3">
-            Une URL par ligne. Les vidéos doivent avoir des sous-titres français (manuels ou
-            automatiques). Le traitement se fait en arrière-plan.
+            Une URL par ligne. Les sous-titres français (manuels ou automatiques) sont utilisés
+            s'il y en a, vérifiés par transcription vocale ; sinon le texte vient de la seule
+            transcription (whisper.cpp actif sur le worker). Traitement en arrière-plan.
           </p>
           <.form for={@url_form} id="url-form" phx-submit="add_urls">
             <.input
@@ -39,8 +40,8 @@ defmodule QuotorWeb.Admin.SourcesLive do
         <section class="rounded-2xl bg-base-200 p-5">
           <h2 class="font-bold mb-1">Envoyer un fichier</h2>
           <p class="text-sm text-base-content/60 mb-3">
-            Vidéo (mp4, mkv, webm, mov) + sous-titres (.vtt ou .srt, obligatoires pour créer les
-            quotes).
+            Vidéo (mp4, mkv, webm, mov) + sous-titres facultatifs (.vtt ou .srt) : sans eux, le
+            texte vient de la transcription vocale.
           </p>
           <.form for={@upload_form} id="upload-form" phx-submit="upload" phx-change="validate_upload">
             <.input field={@upload_form[:title]} type="text" label="Titre" required />
@@ -138,6 +139,9 @@ defmodule QuotorWeb.Admin.SourcesLive do
               <td>
                 <.status_badge status={source.status} />
                 <span :if={!source.enabled} class="badge badge-sm badge-warning ml-1">masquée</span>
+                <div :if={source.text_origin} class="text-xs text-base-content/60 mt-1">
+                  {text_origin_label(source)}
+                </div>
               </td>
               <td>
                 <.link navigate={~p"/admin/quotes?#{%{source_id: source.id}}"} class="link">
@@ -342,6 +346,11 @@ defmodule QuotorWeb.Admin.SourcesLive do
   end
 
   defp author_options, do: Enum.map(Catalog.list_authors(), &{&1.name, &1.id})
+
+  defp text_origin_label(%{text_origin: "transcription"}), do: "texte : transcription vocale"
+  defp text_origin_label(%{asr_status: "done"}), do: "sous-titres vérifiés à la voix"
+  defp text_origin_label(%{asr_status: "failed"}), do: "sous-titres (transcription en échec)"
+  defp text_origin_label(_), do: "sous-titres (non vérifiés)"
 
   defp blank_to_nil(""), do: nil
   defp blank_to_nil(v), do: v

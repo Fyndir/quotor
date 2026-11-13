@@ -1,18 +1,17 @@
 defmodule QuotorWeb.DiscoverLive do
   @moduledoc """
-  Onglet « Découvrir » : parcourir le catalogue sans chercher, au hasard, par
-  nouveautés ou par popularité.
+  Onglet « Découvrir » : les montages créés par les utilisateurs (et non les
+  extraits bruts du catalogue), au hasard, par nouveautés ou par popularité.
   """
   use QuotorWeb, :live_view
 
-  alias Quotor.Catalog
-  alias Quotor.Accounts.Scope
+  alias Quotor.{Media, Montages}
 
   @page_size 24
   @sorts [
-    {"hasard", "Au hasard", "hero-sparkles"},
-    {"recents", "Nouveautés", "hero-clock"},
-    {"populaires", "Populaires", "hero-fire"}
+    {"hasard", "Au hasard", "hero-sparkles", :random},
+    {"recents", "Nouveautés", "hero-clock", :recent},
+    {"populaires", "Populaires", "hero-fire", :popular}
   ]
 
   @impl true
@@ -23,14 +22,14 @@ defmodule QuotorWeb.DiscoverLive do
         <div>
           <h1 class="text-3xl font-black">Découvrir</h1>
           <p class="text-base-content/70">
-            Pas d'idée ? Clique sur un extrait pour l'écouter.
+            Les montages de la communauté : des phrases que personne n'a jamais dites.
           </p>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
           <div class="inline-flex rounded-full bg-base-200 p-1 text-sm" role="tablist">
             <.link
-              :for={{sort, label, icon} <- @sorts}
+              :for={{sort, label, icon, _} <- @sorts}
               patch={~p"/decouvrir?#{%{tri: sort}}"}
               role="tab"
               aria-selected={to_string(@sort == sort)}
@@ -47,6 +46,7 @@ defmodule QuotorWeb.DiscoverLive do
           </div>
           <button
             :if={@sort == "hasard"}
+            id="shuffle"
             type="button"
             phx-click="shuffle"
             class="btn btn-ghost btn-sm"
@@ -65,20 +65,44 @@ defmodule QuotorWeb.DiscoverLive do
           id="discover-empty"
           class="hidden only:block col-span-full rounded-2xl bg-base-200 p-10 text-center text-base-content/70"
         >
-          Le catalogue est encore vide : les extraits arrivent en arrière-plan dès qu'un
-          administrateur ajoute des vidéos.
+          Aucun montage pour l'instant.
+          <.link navigate={~p"/?mode=advanced"} class="link link-primary">Crée le premier</.link>
+          en mode avancé : tape une phrase, Quotor la fait dire par les vidéastes.
         </div>
-        <.quote_card
-          :for={{dom_id, quote} <- @streams.quotes}
+        <.link
+          :for={{dom_id, m} <- @streams.montages}
           id={dom_id}
-          quote={quote}
-          favorite={MapSet.member?(@favorites, quote.id)}
-          can_favorite={@can_favorite}
-        />
+          navigate={~p"/m/#{m.key}"}
+          class="group rounded-2xl overflow-hidden bg-base-200 ring-1 ring-base-300 hover:ring-primary/60 hover:-translate-y-0.5 transition"
+        >
+          <div class="relative aspect-video bg-black">
+            <img
+              :if={Montages.poster_rel(m)}
+              src={Media.url(Montages.poster_rel(m))}
+              alt=""
+              loading="lazy"
+              class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition"
+            />
+            <span class="absolute inset-0 grid place-items-center">
+              <span class="rounded-full bg-black/60 p-3 text-white group-hover:scale-110 transition">
+                <.icon name="hero-play-solid" class="size-6" />
+              </span>
+            </span>
+          </div>
+          <div class="p-3">
+            <p class="font-semibold line-clamp-2">« {m.query} »</p>
+            <p class="mt-1 text-xs text-base-content/60">
+              {length(m.segments)} extrait(s) · {m.views_count} vue(s) · {Calendar.strftime(
+                m.inserted_at,
+                "%d/%m/%Y"
+              )}
+            </p>
+          </div>
+        </.link>
       </div>
 
       <div :if={@has_more} class="mt-8 text-center">
-        <button type="button" phx-click="more" class="btn btn-ghost">Voir plus</button>
+        <button id="more" type="button" phx-click="more" class="btn btn-ghost">Voir plus</button>
       </div>
     </Layouts.app>
     """
@@ -88,73 +112,40 @@ defmodule QuotorWeb.DiscoverLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(
-       page_title: "Découvrir",
-       sorts: @sorts,
-       sort: "hasard",
-       offset: 0,
-       has_more: false,
-       favorites: MapSet.new(),
-       can_favorite: Scope.user?(socket.assigns.current_scope)
-     )
-     |> stream(:quotes, [])}
+     |> assign(page_title: "Découvrir", sorts: @sorts, sort: "hasard", offset: 0, has_more: false)
+     |> stream(:montages, [])}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
-    sort = if params["tri"] in Enum.map(@sorts, &elem(&1, 0)), do: params["tri"], else: "hasard"
+    sorts = Enum.map(@sorts, &elem(&1, 0))
+    sort = if params["tri"] in sorts, do: params["tri"], else: "hasard"
     {:noreply, socket |> assign(sort: sort, offset: 0) |> load(reset: true)}
   end
 
   @impl true
-  def handle_event("shuffle", _params, socket) do
-    {:noreply, load(socket, reset: true)}
-  end
+  def handle_event("shuffle", _params, socket), do: {:noreply, load(socket, reset: true)}
 
   def handle_event("more", _params, socket) do
     {:noreply, socket |> assign(offset: socket.assigns.offset + @page_size) |> load(reset: false)}
   end
 
-  def handle_event("toggle_favorite", %{"id" => id}, socket) do
-    id = String.to_integer(id)
-    scope = socket.assigns.current_scope
-
-    if Scope.user?(scope) do
-      favorites =
-        case Catalog.toggle_favorite(scope, id) do
-          :added -> MapSet.put(socket.assigns.favorites, id)
-          :removed -> MapSet.delete(socket.assigns.favorites, id)
-        end
-
-      socket = assign(socket, favorites: favorites)
-
-      case Catalog.get_public_quote(id) do
-        nil -> {:noreply, socket}
-        quote -> {:noreply, stream_insert(socket, :quotes, quote)}
-      end
-    else
-      {:noreply, put_flash(socket, :error, "Connecte-toi pour garder tes favoris.")}
-    end
-  end
-
   defp load(socket, reset: reset?) do
     %{sort: sort, offset: offset} = socket.assigns
+    {_, _, _, order} = List.keyfind(@sorts, sort, 0)
 
-    quotes =
-      case sort do
-        "hasard" -> Catalog.random_quotes(@page_size)
-        "recents" -> Catalog.latest_quotes(@page_size + 1, offset)
-        "populaires" -> Catalog.popular_quotes(@page_size + 1, offset)
+    {montages, has_more} =
+      case order do
+        :random ->
+          {Montages.list_public(:random, @page_size), false}
+
+        order ->
+          page = Montages.list_public(order, @page_size + 1, offset)
+          {Enum.take(page, @page_size), length(page) > @page_size}
       end
 
-    page = Enum.take(quotes, @page_size)
-    ids = Catalog.favorite_ids(socket.assigns.current_scope, Enum.map(page, & &1.id))
-
     socket
-    |> assign(
-      has_more: sort != "hasard" and length(quotes) > @page_size,
-      favorites: if(reset?, do: ids, else: MapSet.union(socket.assigns.favorites, ids))
-    )
-    |> stream(:quotes, page, reset: reset?)
+    |> assign(has_more: has_more)
+    |> stream(:montages, montages, reset: reset?)
   end
 end

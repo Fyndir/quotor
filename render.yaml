@@ -78,6 +78,14 @@ services:
       # Découpes ffmpeg en parallèle sur ce worker (≈ nombre de cœurs)
       - key: WORKER_MEDIA_CONCURRENCY
         value: "2"
+      # Transcription vocale (whisper.cpp) : vérifie les sous-titres et traite les
+      # vidéos sans sous-titres. Le modèle « small » demande ~1 Go de RAM : désactivée
+      # sur l'offre Starter (512 Mo). Avec une offre Standard (2 Go) ou un worker
+      # chez soi, passez TRANSCRIBE à "true".
+      - key: TRANSCRIBE
+        value: "false"
+      - key: WHISPER_MODEL
+        value: small
       # Facultatif : cookies YouTube (Secret File Render) si YouTube bloque l'IP
       # - key: YTDLP_COOKIES
       #   value: /etc/secrets/cookies.txt

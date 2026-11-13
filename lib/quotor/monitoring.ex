@@ -16,6 +16,7 @@ defmodule Quotor.Monitoring do
         quotes: Catalog.count_quotes(),
         montages: Montages.count(),
         open_reports: Catalog.count_open_reports(),
+        to_review: Catalog.count_quotes_to_review(),
         users: Accounts.count_users_by_role()
       },
       errors_last_hour: Logs.error_count(60),
@@ -127,8 +128,20 @@ defmodule Quotor.Monitoring do
   def tools do
     %{
       ffmpeg: System.find_executable(Application.get_env(:quotor, :ffmpeg_path, "ffmpeg")) != nil,
-      yt_dlp: System.find_executable(System.get_env("YTDLP_PATH", "yt-dlp")) != nil
+      yt_dlp: System.find_executable(System.get_env("YTDLP_PATH", "yt-dlp")) != nil,
+      transcription: transcription_label()
     }
+  end
+
+  # Transcription vocale sur ce nœud : moteur, ou raison de son absence.
+  defp transcription_label do
+    alias Quotor.Ingest.Transcriber
+
+    cond do
+      Transcriber.enabled?() -> Transcriber.impl().label()
+      Transcriber.impl().available?() -> "désactivée (TRANSCRIBE=false)"
+      true -> "non installée"
+    end
   end
 
   @doc "Vérification de santé (endpoint `/health`)."

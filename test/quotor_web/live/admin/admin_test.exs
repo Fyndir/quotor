@@ -7,7 +7,7 @@ defmodule QuotorWeb.Admin.AdminTest do
 
   alias Quotor.{Accounts, Catalog}
 
-  @pages ~w(/admin /admin/sources /admin/chaines /admin/quotes /admin/signalements /admin/utilisateurs /admin/logs /admin/sauvegardes)
+  @pages ~w(/admin /admin/sources /admin/chaines /admin/historique /admin/quotes /admin/signalements /admin/utilisateurs /admin/logs /admin/sauvegardes)
 
   describe "contrôle d'accès" do
     test "un anonyme est redirigé vers l'accueil", %{conn: conn} do
@@ -75,6 +75,45 @@ defmodule QuotorWeb.Admin.AdminTest do
 
       view |> element("#admin-quote-#{quote.id} button[phx-click=toggle]") |> render_click()
       refute Catalog.get_quote!(quote.id).enabled
+    end
+
+    test "quotes à vérifier : filtre, score et validation", %{conn: conn} do
+      [ok, doubtful] = quotes_fixture(source_fixture(), ["Tout va bien.", "Texte douteux."])
+
+      ok |> Ecto.Changeset.change(asr_score: 0.95) |> Quotor.Repo.update!()
+
+      doubtful
+      |> Ecto.Changeset.change(asr_score: 0.3, enabled: false)
+      |> Quotor.Repo.update!()
+
+      {:ok, view, _html} = live(conn, ~p"/admin/quotes?review=1")
+
+      assert has_element?(view, "#admin-quote-#{doubtful.id}")
+      refute has_element?(view, "#admin-quote-#{ok.id}")
+      assert view |> element("#asr-score-#{doubtful.id}") |> render() =~ "30 %"
+
+      view |> element("#review-quote-#{doubtful.id}") |> render_click()
+
+      assert %{enabled: true, asr_score: 1.0} = Catalog.get_quote!(doubtful.id)
+      refute has_element?(view, "#admin-quote-#{doubtful.id}")
+    end
+
+    test "historique : vidéos supprimées listées, puis oubliées", %{conn: conn} do
+      {:ok, kept} = Quotor.Ingest.submit_youtube("https://youtu.be/histokeepxx", nil)
+      {:ok, gone} = Quotor.Ingest.submit_youtube("https://youtu.be/histogonexx", nil)
+      {:ok, _} = Catalog.delete_source(gone)
+
+      {:ok, view, _html} = live(conn, ~p"/admin/historique?statut=deleted")
+
+      gone_entry = Catalog.get_video_history("histogonexx")
+      kept_entry = Catalog.get_video_history("histokeepxx")
+      assert has_element?(view, "#history-#{gone_entry.id}")
+      refute has_element?(view, "#history-#{kept_entry.id}")
+      assert kept.youtube_id == "histokeepxx"
+
+      view |> element("#forget-#{gone_entry.id}") |> render_click()
+      assert Catalog.get_video_history("histogonexx") == nil
+      refute has_element?(view, "#history-#{gone_entry.id}")
     end
 
     test "traiter un signalement en masquant la vidéo", %{conn: conn} do

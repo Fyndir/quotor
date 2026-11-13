@@ -11,7 +11,7 @@ defmodule Quotor.Montages do
   alias Quotor.{Media, Repo, Search}
   alias Quotor.Accounts.Scope
   alias Quotor.Media.Ffmpeg
-  alias Quotor.Montages.Montage
+  alias Quotor.Montages.{Check, Montage}
 
   @doc """
   Planifie puis rend un montage.
@@ -24,33 +24,97 @@ defmodule Quotor.Montages do
     plan = Search.plan(query, opts)
 
     cond do
-      query == "" -> {:error, :empty}
-      plan.segments == [] -> {:error, :no_match}
-      true -> plan |> find_or_create(query, scope) |> render()
+      query == "" ->
+        {:error, :empty}
+
+      plan.segments == [] ->
+        {:error, :no_match}
+
+      true ->
+        plan_key = plan.segments |> Enum.map(&serialize_segment/1) |> key()
+
+        case checked_montage(plan_key) do
+          %Montage{} = m ->
+            # ce plan a déjà été contrôlé et rendu : servi tel quel
+            m |> claim(Scope.user_id(scope)) |> render()
+
+          nil ->
+            {plan, check} = check(plan)
+            plan |> find_or_create(query, scope, plan_key, check) |> render()
+        end
     end
   end
 
-  defp find_or_create(plan, query, scope) do
+  defp checked_montage(plan_key) do
+    from(m in Montage,
+      where: m.plan_key == ^plan_key and m.status == "ready" and not is_nil(m.asr_score),
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  # Contrôle à l'écoute (cf. Quotor.Montages.Check), si la transcription est
+  # disponible sur ce nœud ; sinon le montage est livré sans contrôle.
+  defp check(plan) do
+    if Check.enabled?() do
+      workdir = Media.tmp_dir!("check-#{System.unique_integer([:positive])}")
+
+      try do
+        case Check.run(plan.segments, workdir) do
+          {:ok, segments, result} ->
+            {%{plan | segments: segments}, result}
+
+          {:error, reason} ->
+            Logger.warning("montage non contrôlé : #{inspect(reason)}")
+            {plan, nil}
+        end
+      after
+        File.rm_rf(workdir)
+      end
+    else
+      {plan, nil}
+    end
+  end
+
+  defp claim(%Montage{user_id: nil} = m, user_id) when not is_nil(user_id),
+    do: m |> Ecto.Changeset.change(user_id: user_id) |> Repo.update!()
+
+  defp claim(m, _user_id), do: m
+
+  defp find_or_create(plan, query, scope, plan_key, check) do
     segments = Enum.map(plan.segments, &serialize_segment/1)
     key = key(segments)
     user_id = Scope.user_id(scope)
 
-    case Repo.get_by(Montage, key: key) do
-      %Montage{user_id: nil} = m when not is_nil(user_id) ->
-        m |> Ecto.Changeset.change(user_id: user_id) |> Repo.update!()
+    check_fields =
+      case check do
+        %{asr_score: score, doubtful: doubtful} ->
+          [asr_score: score, doubtful: doubtful, plan_key: plan_key]
 
+        nil ->
+          []
+      end
+
+    case Repo.get_by(Montage, key: key) do
       %Montage{} = m ->
-        m
+        m = claim(m, user_id)
+
+        if check_fields == [],
+          do: m,
+          else: m |> Ecto.Changeset.change(check_fields) |> Repo.update!()
 
       nil ->
         Repo.insert!(
-          %Montage{
-            key: key,
-            query: query,
-            segments: segments,
-            missing: plan.missing,
-            user_id: user_id
-          },
+          struct!(
+            %Montage{
+              key: key,
+              query: query,
+              segments: segments,
+              missing: plan.missing,
+              user_id: user_id
+            },
+            check_fields
+          ),
           on_conflict: :nothing,
           conflict_target: :key
         )
@@ -156,6 +220,60 @@ defmodule Quotor.Montages do
         order_by: [desc: m.updated_at],
         limit: 100
     )
+  end
+
+  ## Découvrir : les montages des utilisateurs
+
+  @doc """
+  Montages publics pour « Découvrir » : ceux des utilisateurs connectés, prêts,
+  que leur auteur n'a pas retirés, et dont **tous les extraits sont encore
+  visibles** (un extrait masqué ou retiré suite à un signalement fait
+  disparaître les montages qui l'utilisent). `sort` : `:random`, `:recent`,
+  `:popular`.
+  """
+  def list_public(sort, limit, offset \\ 0) do
+    from(m in Montage,
+      where: not is_nil(m.user_id) and m.listed and m.status == "ready",
+      where:
+        fragment(
+          """
+          NOT EXISTS (
+            SELECT 1 FROM unnest(?) AS seg
+            LEFT JOIN quotes q ON q.id = (seg->>'quote_id')::bigint
+            LEFT JOIN sources s ON s.id = q.source_id
+            WHERE q.id IS NULL OR q.status <> 'ready' OR NOT q.enabled OR NOT s.enabled
+          )
+          """,
+          m.segments
+        ),
+      limit: ^limit,
+      offset: ^offset
+    )
+    |> order_public(sort)
+    |> Repo.all()
+  end
+
+  defp order_public(query, :random), do: order_by(query, fragment("random()"))
+  defp order_public(query, :recent), do: order_by(query, [m], desc: m.inserted_at, desc: m.id)
+
+  defp order_public(query, :popular),
+    do: order_by(query, [m], desc: m.views_count, desc: m.inserted_at, desc: m.id)
+
+  def increment_views(%Montage{id: id}) do
+    from(m in Montage, where: m.id == ^id) |> Repo.update_all(inc: [views_count: 1])
+  end
+
+  @doc "Le montage appartient-il à l'utilisateur de `scope` ?"
+  def owner?(%Montage{user_id: uid}, %Scope{user: %{id: uid}}) when not is_nil(uid), do: true
+  def owner?(_, _), do: false
+
+  @doc "Affiche ou retire un montage de « Découvrir » (son auteur uniquement)."
+  def set_listed(%Montage{} = montage, scope, listed) when is_boolean(listed) do
+    if owner?(montage, scope) do
+      montage |> Ecto.Changeset.change(listed: listed) |> Repo.update()
+    else
+      {:error, :forbidden}
+    end
   end
 
   def count, do: Repo.aggregate(Montage, :count)

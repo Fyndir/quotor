@@ -29,7 +29,11 @@ defmodule QuotorWeb.MyMontagesLive do
           <div class="p-3">
             <p class="font-semibold truncate">« {m.query} »</p>
             <p class="text-xs text-base-content/60">
-              {length(m.segments)} extrait(s) · {Calendar.strftime(m.updated_at, "%d/%m/%Y")}
+              {length(m.segments)} extrait(s) · {m.views_count} vue(s) · {Calendar.strftime(
+                m.updated_at,
+                "%d/%m/%Y"
+              )}
+              <span :if={!m.listed} class="badge badge-xs ml-1">hors Découvrir</span>
             </p>
           </div>
         </.link>

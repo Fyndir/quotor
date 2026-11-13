@@ -11,6 +11,15 @@ defmodule Quotor.Montages.Montage do
     field :status, :string, default: "pending"
     field :error, :string
 
+    # vues de la page du montage, et présence dans « Découvrir »
+    field :views_count, :integer, default: 0
+    field :listed, :boolean, default: true
+    # contrôle à l'écoute : part des mots de la phrase entendus (nil = non contrôlé)
+    # et mots restés douteux
+    field :asr_score, :float
+    field :doubtful, {:array, :string}, default: []
+    field :plan_key, :string
+
     belongs_to :user, Quotor.Accounts.User
 
     timestamps(type: :utc_datetime)

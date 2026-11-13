@@ -21,6 +21,8 @@ defmodule Quotor.Catalog.Quote do
     field :status, :string, default: "pending"
     field :enabled, :boolean, default: true
     field :views_count, :integer, default: 0
+    # accord texte / parole (0..1, transcription whisper.cpp) ; nil = non vérifié
+    field :asr_score, :float
 
     belongs_to :source, Quotor.Catalog.Source
     belongs_to :author, Quotor.Catalog.Author
@@ -38,7 +40,14 @@ defmodule Quotor.Catalog.Quote do
   end
 
   def media_changeset(quote, attrs) do
-    cast(quote, attrs, [:clip_path, :thumb_path, :status])
+    cast(quote, attrs, [
+      :clip_path,
+      :thumb_path,
+      :status,
+      :asr_score,
+      :clip_start_ms,
+      :clip_end_ms
+    ])
   end
 
   defp put_norm(changeset) do
@@ -47,6 +56,19 @@ defmodule Quotor.Catalog.Quote do
       text -> put_change(changeset, :norm, Quotor.Text.normalize(text))
     end
   end
+
+  @review_threshold 0.8
+
+  @doc "Score en dessous duquel une quote est « à vérifier »."
+  def review_threshold, do: @review_threshold
+
+  @doc "Quote à vérifier (texte et parole divergent) ?"
+  def needs_review?(%__MODULE__{status: "review"}), do: true
+
+  def needs_review?(%__MODULE__{asr_score: score}) when is_float(score),
+    do: score < @review_threshold
+
+  def needs_review?(_), do: false
 
   def duration_ms(%__MODULE__{clip_start_ms: s, clip_end_ms: e}), do: e - s
 end

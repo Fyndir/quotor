@@ -4,7 +4,11 @@ defmodule Quotor.Ingest do
 
       soumission (admin / chaîne suivie)
         └─ IngestSource : téléchargement (yt-dlp) + sous-titres → quotes + mots
-             └─ CutSource : découpe ffmpeg de chaque quote + vignette
+             transcription vocale (whisper.cpp) : vérifie et recale les quotes,
+             ou les crée seule si la vidéo n'a pas de sous-titres
+             └─ CutSource : découpe ffmpeg de chaque quote + vignette, puis affinage :
+                  chaque clip est réécouté, élargi s'il manque un mot au bord, et
+                  publié seulement s'il est fiable (sinon « à vérifier »)
 
   Les vidéos sources sont supprimées après découpe (sauf `KEEP_SOURCES=true`).
   """
@@ -14,7 +18,7 @@ defmodule Quotor.Ingest do
   alias Quotor.{Catalog, Media}
   alias Quotor.Accounts.Scope
   alias Quotor.Catalog.{Channel, Source}
-  alias Quotor.Ingest.{Downloader, Segmenter, Subtitles}
+  alias Quotor.Ingest.{Alignment, Downloader, Refine, Segmenter, Subtitles, Transcriber}
   alias Quotor.Media.Ffmpeg
   alias Quotor.Workers
 
@@ -81,10 +85,10 @@ defmodule Quotor.Ingest do
 
         with {:ok, source} <- fetch(source),
              {:ok, source} <- ensure_author(source),
-             {:ok, sub_path} <- subtitle_file(source),
-             {:ok, parsed} <- Subtitles.parse_file(sub_path),
-             :ok <- Media.evict(source.subtitle_path),
-             segments when segments != [] <- Segmenter.segment(parsed) do
+             {:ok, parsed} <- read_subtitles(source),
+             {asr, asr_status} = transcribe(source),
+             {:ok, segments, origin} <- build_segments(parsed, asr),
+             segments when segments != [] <- segments do
           duration = probe_duration(source)
           {:ok, count} = Catalog.replace_quotes(source, segments, duration)
 
@@ -92,19 +96,100 @@ defmodule Quotor.Ingest do
             Catalog.update_source(source, %{
               status: "cutting",
               quotes_count: count,
+              text_origin: origin,
+              asr_status: asr_status,
               duration_s: source.duration_s || (duration && div(duration, 1000))
             })
 
-          Logger.info("source #{source.id} : #{count} quotes (sous-titres #{parsed.kind})")
+          to_review = Enum.count(segments, &((&1[:asr_score] || 1.0) < 0.8))
+
+          Logger.info(
+            "source #{source.id} : #{count} quotes (#{describe_origin(origin, parsed)}, transcription #{asr_status}, #{to_review} à vérifier)"
+          )
+
           %{source_id: source.id} |> Workers.CutSource.new() |> Oban.insert()
           :ok
         else
-          [] -> fail(source, "Aucune phrase exploitable dans les sous-titres", :cancel)
-          {:error, :no_subtitles} -> fail(source, "Aucun sous-titre français disponible", :cancel)
-          {:error, reason} -> fail(source, inspect_reason(reason), :error)
+          [] ->
+            fail(source, "Aucune phrase exploitable", :cancel)
+
+          {:error, :no_text} ->
+            fail(
+              source,
+              "Aucun sous-titre français disponible, et transcription vocale désactivée",
+              :cancel
+            )
+
+          {:error, reason} ->
+            fail(source, inspect_reason(reason), :error)
         end
     end
   end
+
+  # Sous-titres analysés, ou `nil` si la vidéo n'en a pas.
+  defp read_subtitles(source) do
+    case subtitle_file(source) do
+      {:ok, sub_path} ->
+        with {:ok, parsed} <- Subtitles.parse_file(sub_path) do
+          Media.evict(source.subtitle_path)
+          {:ok, parsed}
+        end
+
+      {:error, :no_subtitles} ->
+        {:ok, nil}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Transcription vocale de la vidéo (whisper.cpp) : `{mots | erreur, statut}`.
+  defp transcribe(%Source{file_path: rel} = source) when is_binary(rel) do
+    workdir = Media.tmp_dir!("asr-#{source.id}-#{System.unique_integer([:positive])}")
+
+    try do
+      with {:ok, path} <- Media.fetch(rel),
+           {:ok, words} <- Transcriber.run(path, workdir) do
+        {{:ok, words}, "done"}
+      else
+        :disabled ->
+          {:disabled, "disabled"}
+
+        {:error, reason} ->
+          Logger.warning(
+            "source #{source.id} : transcription en échec : #{inspect_reason(reason)}"
+          )
+
+          {{:error, inspect_reason(reason)}, "failed"}
+      end
+    after
+      File.rm_rf(workdir)
+    end
+  end
+
+  defp transcribe(_source), do: {:disabled, "disabled"}
+
+  # Sous-titres + transcription : les quotes viennent des sous-titres,
+  # vérifiées et recalées sur la parole. Sous-titres seuls : comme avant.
+  # Transcription seule : les quotes viennent de la transcription.
+  defp build_segments(parsed, asr) when not is_nil(parsed) do
+    segments = Segmenter.segment(parsed)
+
+    case asr do
+      {:ok, words} -> {:ok, Alignment.align(segments, words), "subtitles"}
+      _ -> {:ok, segments, "subtitles"}
+    end
+  end
+
+  defp build_segments(nil, {:ok, words}),
+    do: {:ok, Alignment.from_transcript(words), "transcription"}
+
+  # sans sous-titres, une transcription en échec est réessayée (modèle à télécharger…)
+  defp build_segments(nil, {:error, reason}), do: {:error, reason}
+  defp build_segments(nil, :disabled), do: {:error, :no_text}
+
+  defp describe_origin("transcription", _), do: "transcription vocale"
+  defp describe_origin(_, parsed), do: "sous-titres #{parsed.kind}"
 
   defp fetch(%Source{origin: "upload"} = source), do: {:ok, source}
 
@@ -201,17 +286,85 @@ defmodule Quotor.Ingest do
     end
   end
 
+  # Découpe les clips dans un dossier de travail, puis (transcription active)
+  # les affine avant de les publier : cf. `Quotor.Ingest.Refine`.
   defp do_cut(source, input) do
     quotes = Catalog.pending_quotes_for_source(source.id)
     workdir = Media.tmp_dir!("cut-#{source.id}-#{System.unique_integer([:positive])}")
 
-    failures =
-      try do
-        Enum.count(quotes, &(cut_quote(source, input, &1, workdir) == :error))
-      after
-        File.rm_rf(workdir)
+    try do
+      {items, failures} =
+        Enum.reduce(quotes, {[], 0}, fn quote, {items, failures} ->
+          case cut_local(input, quote, quote.clip_start_ms, quote.clip_end_ms, workdir) do
+            {:ok, item} ->
+              {[item | items], failures}
+
+            {:error, msg} ->
+              Logger.warning("quote #{quote.id} : #{inspect_reason(msg)}")
+              Catalog.update_quote_media(quote, %{status: "failed"})
+              {items, failures + 1}
+          end
+        end)
+
+      with {:ok, verdicts} <- refine(source, input, Enum.reverse(items), workdir) do
+        published = Enum.count(verdicts, fn {item, verdict} -> publish(source, item, verdict) end)
+        finish(source, length(quotes), failures, published)
+      end
+    after
+      File.rm_rf(workdir)
+    end
+  end
+
+  # Sans transcription : les clips sont publiés tels quels, comme avant.
+  defp refine(source, input, items, workdir) do
+    if Transcriber.enabled?() and items != [] do
+      {:ok, _} = Catalog.update_source(source, %{status: "refining"})
+      neighbours = Catalog.list_quotes_for_source(source.id)
+
+      recut = fn item, start_ms, end_ms ->
+        cut_local(input, item.quote, start_ms, end_ms, workdir)
       end
 
+      case Refine.run(items, neighbours, workdir, recut) do
+        {:ok, verdicts} ->
+          {:ok, verdicts}
+
+        {:error, reason} ->
+          {:error, "affinage impossible : #{inspect_reason(reason)}"}
+      end
+    else
+      {:ok, Enum.map(items, &{&1, %{status: "ready", asr_score: &1.quote.asr_score}})}
+    end
+  end
+
+  # Range le clip et la vignette dans le stockage et met la quote à jour.
+  # Renvoie `true` si elle est publiée.
+  defp publish(source, item, verdict) do
+    clip_rel = Media.clip_rel(source.id, item.quote.id)
+    thumb_rel = Media.thumb_rel(source.id, item.quote.id)
+
+    with :ok <- Media.store(item.clip, clip_rel),
+         :ok <- Media.store(item.thumb, thumb_rel) do
+      {:ok, _} =
+        Catalog.update_quote_media(item.quote, %{
+          status: verdict.status,
+          asr_score: verdict.asr_score,
+          clip_path: clip_rel,
+          thumb_path: thumb_rel,
+          clip_start_ms: item.clip_start_ms,
+          clip_end_ms: item.clip_end_ms
+        })
+
+      verdict.status == "ready"
+    else
+      {:error, msg} ->
+        Logger.warning("quote #{item.quote.id} : #{inspect_reason(msg)}")
+        Catalog.update_quote_media(item.quote, %{status: "failed"})
+        false
+    end
+  end
+
+  defp finish(source, total, failures, published) do
     if failures > 0, do: Logger.warning("source #{source.id} : #{failures} découpe(s) en échec")
 
     {:ok, source} = Catalog.update_source(source, %{status: "ready", error: nil})
@@ -222,38 +375,27 @@ defmodule Quotor.Ingest do
       Catalog.update_source(source, %{file_path: nil})
     end
 
+    to_review = total - failures - published
+
     Logger.info(
-      "source #{source.id} prête (#{length(quotes) - failures}/#{length(quotes)} clips)"
+      "source #{source.id} prête : #{published} clip(s) publié(s), #{to_review} à vérifier, #{failures} en échec"
     )
 
     :ok
   end
 
-  # Découpe une quote dans un dossier de travail local, puis range le clip et
-  # la vignette dans le stockage.
-  defp cut_quote(source, input, quote, workdir) do
-    clip_rel = Media.clip_rel(source.id, quote.id)
-    thumb_rel = Media.thumb_rel(source.id, quote.id)
-    clip = Path.join(workdir, "#{quote.id}.mp4")
-    thumb = Path.join(workdir, "#{quote.id}.jpg")
-    duration = quote.clip_end_ms - quote.clip_start_ms
+  # Découpe `[start_ms, end_ms]` de la vidéo dans le dossier de travail (clip
+  # + vignette), sans rien publier.
+  defp cut_local(input, quote, start_ms, end_ms, workdir) do
+    n = System.unique_integer([:positive])
+    clip = Path.join(workdir, "#{quote.id}-#{n}.mp4")
+    thumb = Path.join(workdir, "#{quote.id}-#{n}.jpg")
+    duration = end_ms - start_ms
 
-    with {:ok, _} <- Ffmpeg.cut_clip(input, quote.clip_start_ms, duration, clip),
-         {:ok, _} <- Ffmpeg.thumbnail(clip, div(duration, 2), thumb),
-         :ok <- Media.store(clip, clip_rel),
-         :ok <- Media.store(thumb, thumb_rel) do
-      Catalog.update_quote_media(quote, %{
-        status: "ready",
-        clip_path: clip_rel,
-        thumb_path: thumb_rel
-      })
-
-      :ok
-    else
-      {:error, msg} ->
-        Logger.warning("quote #{quote.id} : #{inspect_reason(msg)}")
-        Catalog.update_quote_media(quote, %{status: "failed"})
-        :error
+    with {:ok, _} <- Ffmpeg.cut_clip(input, start_ms, duration, clip),
+         {:ok, _} <- Ffmpeg.thumbnail(clip, div(duration, 2), thumb) do
+      {:ok,
+       %{quote: quote, clip: clip, thumb: thumb, clip_start_ms: start_ms, clip_end_ms: end_ms}}
     end
   end
 
@@ -265,7 +407,8 @@ defmodule Quotor.Ingest do
       {:ok, entries} ->
         new =
           entries
-          |> Enum.reject(&Catalog.get_source_by_youtube_id(&1.id))
+          # déjà analysée, même supprimée depuis : cf. historique des vidéos
+          |> Enum.reject(&Catalog.known_video?(&1.id))
           |> Enum.map(fn entry ->
             submit_youtube(Source.canonical_url(entry.id), nil, %{
               channel_id: channel.id,

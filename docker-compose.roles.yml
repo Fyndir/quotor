@@ -60,6 +60,9 @@ services:
       <<: *common
       ROLE: worker
       WORKER_MEDIA_CONCURRENCY: "2"
+    volumes:
+      # modèles whisper.cpp partagés entre workers (téléchargés une fois)
+      - roles_models:/data/models
     depends_on:
       web:
         condition: service_started
@@ -67,3 +70,4 @@ services:
 volumes:
   roles_pgdata:
   roles_s3:
+  roles_models:

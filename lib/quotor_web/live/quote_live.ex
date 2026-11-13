@@ -66,6 +66,14 @@ defmodule QuotorWeb.QuoteLive do
               <.icon name="hero-film" class="size-4" />
               <span data-label>Copier le lien vidéo (.mp4)</span>
             </button>
+            <a
+              id="download-quote"
+              href={~p"/q/#{@quote.id}/telecharger"}
+              download
+              class="btn btn-ghost btn-sm"
+            >
+              <.icon name="hero-arrow-down-tray" class="size-4" /> Télécharger la vidéo
+            </a>
             <button
               :if={@can_favorite}
               type="button"

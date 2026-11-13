@@ -126,6 +126,91 @@ defmodule Quotor.Media.Ffmpeg do
     )
   end
 
+  @doc "Extrait `[start_ms, start_ms + duration_ms]` de la piste audio en WAV mono 16 kHz."
+  def audio_segment(input, start_ms, duration_ms, output) do
+    run(ffmpeg(), [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-ss",
+      seconds(start_ms),
+      "-i",
+      input,
+      "-t",
+      seconds(duration_ms),
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      "-c:a",
+      "pcm_s16le",
+      output
+    ])
+  end
+
+  @doc "Silence de `ms` millisecondes (WAV mono 16 kHz)."
+  def silence(ms, output) do
+    run(ffmpeg(), [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-t",
+      seconds(ms),
+      "-i",
+      "anullsrc=r=16000:cl=mono",
+      "-c:a",
+      "pcm_s16le",
+      output
+    ])
+  end
+
+  @doc "Met bout à bout des WAV de même format (mono 16 kHz) sans réencodage."
+  def concat_audio(files, output, workdir) do
+    list = Path.join(workdir, "concat-#{System.unique_integer([:positive])}.txt")
+    File.write!(list, Enum.map_join(files, "\n", &"file '#{String.replace(&1, "'", "'\\''")}'"))
+
+    run(ffmpeg(), [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      list,
+      "-c",
+      "copy",
+      output
+    ])
+  end
+
+  @doc "Extrait la piste audio en WAV mono 16 kHz (format attendu par whisper.cpp)."
+  def extract_audio(input, output) do
+    run(ffmpeg(), [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      input,
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      "-c:a",
+      "pcm_s16le",
+      output
+    ])
+  end
+
   @doc "Durée d'un fichier média en millisecondes."
   def duration_ms(path) do
     case run(ffprobe(), [

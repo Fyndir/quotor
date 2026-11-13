@@ -6,10 +6,11 @@
 ![Accueil de Quotor](docs/screenshots/accueil.png)
 
 Quotor découpe des vidéos (YouTube ou fichiers fournis par un admin) en courtes répliques, les
-« quotes », grâce à leurs sous-titres. On les retrouve en tapant une phrase, on les partage (Discord
+« quotes », grâce à leurs sous-titres vérifiés par transcription vocale (ou à la seule
+transcription quand il n'y a pas de sous-titres). On les retrouve en tapant une phrase, on les partage (Discord
 compris), et on peut assembler plusieurs extraits pour composer une phrase qui n'a jamais été dite.
 
-**Stack** : Elixir 1.19 · Phoenix 1.8 (LiveView) · PostgreSQL · Oban · ffmpeg · yt-dlp · Docker.
+**Stack** : Elixir 1.19 · Phoenix 1.8 (LiveView) · PostgreSQL · Oban · ffmpeg · yt-dlp · whisper.cpp · Docker.
 
 **Auteur** : concept, design et code © 2026 **Antoine Gamain** — tous droits réservés
 ([LICENSE](LICENSE)). Voir [Auteur et propriété](#auteur-et-propriété).
@@ -52,15 +53,18 @@ premier. Cliquer sur une carte lit l'extrait **avec le son**.
 
 ### Onglet Découvrir
 
-Accessible à tous depuis l'en-tête (`/decouvrir`), il permet de parcourir le catalogue sans
-chercher, selon trois tris :
+Accessible à tous depuis l'en-tête (`/decouvrir`), il présente les **montages créés par les
+utilisateurs**, et non les extraits bruts du catalogue, selon trois tris :
 
 - **Au hasard**, avec un bouton « Mélanger » ;
 - **Nouveautés** ;
-- **Populaires**, d'après le nombre de vues.
+- **Populaires**, d'après le nombre de vues de la page du montage.
 
-Les nouveautés et les populaires se chargent 24 par 24 (« Voir plus »). Les utilisateurs connectés
-peuvent y mettre des extraits en favori.
+Les nouveautés et les populaires se chargent 24 par 24 (« Voir plus »). Y figurent les montages
+des utilisateurs connectés (les montages anonymes, purgés après 7 jours, n'y sont pas). Un
+montage disparaît de Découvrir dès qu'un de ses extraits est masqué (signalement, retrait de la
+vidéo…). Son auteur peut le retirer de Découvrir depuis la page du montage, le lien restant
+partageable.
 
 ![Onglet Découvrir](docs/screenshots/decouvrir.png)
 
@@ -70,7 +74,24 @@ On tape n'importe quelle phrase. Quotor la découpe en **plus longs morceaux pos
 le catalogue (au mot près), puis les assemble en une seule vidéo. Les morceaux utilisés sont
 affichés (chaque pastille renvoie vers l'extrait d'origine), les mots introuvables sont signalés, et
 « Autre version » propose d'autres extraits. Les montages sont mis en cache et ont une page
-partageable.
+partageable, avec un bouton **Télécharger** (fichier `quotor-<phrase>.mp4`).
+
+**Contrôle à l'écoute avant livraison** (si la transcription vocale est active sur le site) :
+chaque morceau du montage est réécouté par whisper.cpp, avec 0,4 s de contexte. Tous les
+morceaux sont mis bout à bout dans un seul fichier audio, transcrit en une passe. Ensuite :
+
+- un mot coupé par la découpe fait recaler le morceau sur la parole (250 ms au plus) ;
+- un morceau qui ne dit pas ses mots est remplacé par le même passage pris dans un autre extrait
+  (deux essais au plus) ;
+- le montage est livré avec son résultat (« vérifié à l'écoute », ou les mots restés douteux).
+
+Un plan déjà contrôlé est resservi sans nouvelle écoute.
+
+**Idées de phrases** : en mode avancé, le champ vide propose des phrases toutes faites, par
+**greffe** de deux répliques publiées sur un mot commun. « Bonjour à tous, c'est… » plus « …c'est
+que j'ai payé pour ça » donne « Bonjour à tous, c'est que j'ai payé pour ça ». Chaque moitié existe
+dans un extrait affiné, donc l'idée est toujours montable. Les greffes entre vidéastes différents
+passent en premier. Un clic lance le montage, et « Autres idées » en tire de nouvelles.
 
 ![Montage partageable](docs/screenshots/montage-partage.png)
 
@@ -128,11 +149,32 @@ dernière heure, signalements en attente, espace disque des médias. Actualisati
 ![Supervision](docs/screenshots/admin-supervision.png)
 
 **Vidéos sources** : l'admin ajoute des URLs YouTube particulières (plusieurs à la fois) ou envoie
-un fichier vidéo avec ses sous-titres. Il suit le traitement en direct, relance, masque ou supprime
+un fichier vidéo, avec ou sans sous-titres. Il suit le traitement en direct, relance, masque ou supprime
 une vidéo. Les **chaînes suivies** (JDG, Cyprien, Bref, Chroma pré-enregistrées, désactivées par
-défaut) sont synchronisées chaque nuit.
+défaut) sont synchronisées chaque nuit. Un **historique** garde la trace de chaque vidéo YouTube
+soumise, même supprimée depuis : la synchronisation ne réimporte jamais une vidéo déjà vue. La
+page **Historique** liste ces vidéos (analysées, en échec, supprimées) ; une vidéo supprimée peut
+y être réanalysée tout de suite, ou « oubliée » pour que la synchronisation la reprenne.
 
 ![Vidéos sources](docs/screenshots/admin-sources.png)
+
+**Transcription vocale (whisper.cpp)** : le worker transcrit l'audio de chaque vidéo et le compare
+aux sous-titres, quote par quote :
+
+- chaque quote reçoit un **score d'accord** entre son texte et ce qui est réellement dit ;
+- ses **bornes sont recalées** sur la parole, avec une marge (0,35 s avant, 0,45 s après) qui
+  ne déborde jamais sur la phrase voisine ;
+- **affinage avant publication** : les clips découpés sont « bruts » et ne sont pas publiés. Chacun
+  est réécouté (tous les clips d'une vidéo en un seul passage de whisper.cpp). S'il manque le
+  premier ou le dernier mot, le clip est élargi de 0,5 s de ce côté et redécoupé, jusqu'à deux
+  fois. Seuls les clips complets dont la **fiabilité** (part des mots entendus) atteint
+  `TRANSCRIBE_MIN_SCORE` (75 %) sont publiés ;
+- les autres sont **« à vérifier »** : **Quotes → À vérifier** les liste avec leur score, et l'admin
+  les publie en un clic ou corrige le texte ;
+- **une vidéo sans sous-titres** est traitée quand même : le texte vient de la transcription.
+
+La page **Vidéos sources** indique d'où vient le texte de chaque vidéo (sous-titres vérifiés à la
+voix, transcription seule…), et la supervision le moteur utilisé.
 
 **Auteurs** : l'admin crée et modifie les auteurs (nom, type personne ou chaîne, lien,
 description), puis les attribue à une vidéo depuis « Vidéos sources » (colonne *Auteur*, ou à
@@ -337,8 +379,9 @@ Supprimez alors le service `quotor-worker` de Render, ou laissez les deux se par
 1. Connectez-vous avec `ADMIN_EMAIL`, puis ouvrez **Admin → Supervision**. Vérifiez trois choses :
    - le rôle du nœud est `web` ;
    - le stockage indiqué est `S3 · quotor` ;
-   - ffmpeg et yt-dlp sont détectés.
-2. **Admin → Vidéos sources** : collez quelques URLs YouTube ayant des sous-titres français. Suivez
+   - ffmpeg et yt-dlp sont détectés (et la transcription vocale, sur un worker qui l'a activée).
+2. **Admin → Vidéos sources** : collez quelques URLs YouTube, de préférence avec des sous-titres
+   français. Suivez
    leur passage par les statuts *téléchargement*, *découpe* puis *prête*.
 3. **Admin → Chaînes suivies** : vérifiez l'URL de chaque chaîne, ajustez le nombre de vidéos, puis
    activez-la.
@@ -372,6 +415,14 @@ Supprimez alors le service `quotor-worker` de Render, ou laissez les deux se par
 | `BACKUP_MEDIA` | `auto` (médias inclus s'ils sont sur disque local), `always` (aussi depuis S3), `never` | `auto` |
 | `BACKUP_S3_BUCKET` | bucket **privé** des sauvegardes (mêmes `S3_ENDPOINT` et clés) ; sinon `BACKUP_DIR` | – |
 | `BACKUP_DIR` | dossier des sauvegardes, à placer sur un volume distinct | `/data/backups` |
+| `TRANSCRIBE` | transcription vocale : `auto` (active si whisper.cpp est installé), `true`, `false` | `auto` |
+| `TRANSCRIBE_MIN_SCORE` | fiabilité minimale d'un clip affiné (part des mots entendus) pour être publié | `0.75` |
+| `WHISPER_MODEL` | modèle whisper.cpp : `base`, `small`, `medium`, `large-v3-turbo`… ou chemin d'un `.bin` | `small` |
+| `WHISPER_THREADS` | threads de transcription | nb de cœurs (max. 8) |
+| `WHISPER_LANGUAGE` | langue parlée | `fr` |
+| `WHISPER_VAD` | détecteur de voix (ignore musique et silences, mais dégrade les horodatages) | `false` |
+| `WHISPER_MODELS_DIR` | dossier des modèles, téléchargés au premier usage | `/data/models` |
+| `WHISPER_PATH` | binaire whisper.cpp | `whisper-cli` |
 | `YTDLP_PATH` / `YTDLP_COOKIES` / `YTDLP_EXTRA_ARGS` | options de yt-dlp | – |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `MAIL_FROM` | emails (liens de connexion, changement d'email) ; sans SMTP, ils sont seulement journalisés | – |
 | `LEGAL_EDITOR_NAME`, `LEGAL_EDITOR_ADDRESS`, `LEGAL_CONTACT_EMAIL`, `LEGAL_PUBLICATION_DIRECTOR` | contenu des mentions légales | valeurs à remplacer |
@@ -435,6 +486,8 @@ l'offre).
         ┌──────────────▼── nœud(s) worker (ROLE=worker) ─────────────┐
         │ IngestSource (file "ingest")                               │
         │   yt-dlp : vidéo ≤ 480p + sous-titres FR → quotes, mots    │
+        │   whisper.cpp : transcription → score + recalage des quotes │
+        │   (ou quotes depuis la transcription, sans sous-titres)    │
         │ CutSource (file "media", WORKER_MEDIA_CONCURRENCY)         │
         │   ffmpeg : un clip mp4 + une vignette par quote            │
         │ Cron 04:00 UTC : chaînes suivies ; 03:30 : nettoyage       │
@@ -455,7 +508,7 @@ l'offre).
 | Dossier | Contenu |
 | --- | --- |
 | `lib/quotor/catalog/` | schémas : sources, quotes, mots horodatés, auteurs, favoris, signalements |
-| `lib/quotor/ingest/` | téléchargement (yt-dlp), analyse des sous-titres, segmentation |
+| `lib/quotor/ingest/` | téléchargement (yt-dlp), analyse des sous-titres, segmentation, transcription (whisper.cpp) et alignement texte / parole |
 | `lib/quotor/search.ex` | recherche standard et plan de montage |
 | `lib/quotor/montages.ex` | rendu et cache des montages |
 | `lib/quotor/media.ex`, `lib/quotor/storage/` | accès aux fichiers : disque local ou S3/R2 (signature SigV4 via Req), cache local |
@@ -472,9 +525,12 @@ prise en charge des requêtes `Range` (nécessaire à la lecture vidéo sur Safa
 
 ## Tests et CI
 
-211 tests couvrent :
+249 tests couvrent :
 
 - l'analyse des sous-titres (y compris le format mot à mot de YouTube) et la segmentation ;
+- l'alignement texte / parole (score, recalage, mots approchants, quotes depuis la seule
+  transcription), la lecture du JSON de whisper.cpp et le pipeline avec transcription (confirmée,
+  contredite, en échec, sans sous-titres) ;
 - la recherche et le plan de montage ;
 - le catalogue ;
 - le **pipeline complet** d'ingestion, avec un faux téléchargeur et une vraie découpe ffmpeg ;
@@ -508,12 +564,24 @@ du fichier).
   YouTube est aussi contraire à ses conditions d'utilisation.
 - **yt-dlp est figé au moment du build** de l'image. Quand YouTube change, il faut reconstruire
   l'image pour obtenir une version récente.
-- **Des sous-titres français sont obligatoires** : il n'y a pas de transcription automatique
-  (Whisper, par exemple). Une vidéo sans sous-titres passe en échec.
+- **Transcription vocale (whisper.cpp)** :
+  - **coût CPU** : avec le modèle `small`, compter de l'ordre d'un quart de la durée de la vidéo
+    sur 4 à 8 cœurs (5 min pour 20 min de vidéo), et ~1 Go de RAM. Impossible sur un worker
+    Render Starter (512 Mo) : le blueprint la désactive (`TRANSCRIBE=false`). Il faut une offre
+    Standard ou un worker chez soi ;
+  - **premier usage** : le modèle (~500 Mo pour `small`) est téléchargé ; sur un disque éphémère
+    (Render), il l'est à chaque redéploiement ;
+  - **qualité** : bonne en français courant, moins sur l'argot, les noms propres (« JDG »), les voix
+    qui se chevauchent et la musique, où Whisper peut inventer du texte. Le score repère ces cas,
+    sans les corriger. Sans sous-titres, le texte n'est relu par personne : les quotes douteuses
+    tombent dans « À vérifier » ;
+  - **pas d'identification des voix** : une quote n'est pas attribuée automatiquement à la
+    personne qui parle ;
+  - sans transcription active, une vidéo sans sous-titres passe en échec, comme avant.
 - **Les sous-titres automatiques** n'ont ni ponctuation ni majuscules et contiennent des erreurs de
   reconnaissance. Les textes des quotes peuvent être corrigés à la main dans l'admin.
-- **Avec des sous-titres manuels**, le temps de chaque mot est interpolé : les montages sont moins
-  précis qu'avec les sous-titres automatiques.
+- **Avec des sous-titres manuels sans transcription**, le temps de chaque mot est interpolé : les
+  montages sont moins précis. Avec la transcription, les mots reconnus prennent leur temps réel.
 
 ### Recherche et montage
 
@@ -528,6 +596,16 @@ du fichier).
 
 ### Hébergement et exploitation
 
+- **Contrôle des montages** : il ajoute 2 à 5 s au rendu d'un montage (une passe de whisper.cpp,
+  modèle `small`, 8 cœurs), et ne tourne que si le nœud web a la transcription. Sur Render, le
+  site (Starter) ne l'a pas : les montages y sont livrés sans contrôle. Les morceaux d'un seul mot
+  très court restent les moins bien reconnus.
+- **Idées de phrases** : générées sans IA, par greffe de répliques réelles. Certaines sont
+  bancales (« Trois que ça marche… ») ; « Autres idées » en tire d'autres.
+- **Affinage** : il réécoute chaque clip, ce qui ajoute environ 50 % au temps de transcription
+  d'une vidéo. Sans transcription active, les clips sont publiés bruts, sans vérification. Un clip
+  dont le premier mot est mal reconnu (et non coupé) est élargi inutilement, puis part « à
+  vérifier ».
 - **Les montages sont rendus par le site**, pas par les workers : pendant un rendu, le nœud web
   consomme du CPU, et télécharge les clips depuis le bucket s'ils ne sont pas en cache.
 - **La découpe d'une vidéo se fait sur un seul worker** : plusieurs workers traitent plusieurs vidéos

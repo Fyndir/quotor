@@ -56,7 +56,20 @@ defmodule Quotor.CatalogTest do
       assert quote.norm == "salut les amis"
       assert Enum.map(quote.words, & &1.word) == ~w(salut les amis)
       assert quote.clip_start_ms == 0
-      assert quote.clip_end_ms == quote.end_ms + 250
+      assert quote.clip_end_ms == quote.end_ms + 450
+    end
+
+    test "marges larges, sans empiéter sur les phrases voisines" do
+      segs = [
+        %{start_ms: 1_000, end_ms: 2_000},
+        %{start_ms: 2_200, end_ms: 3_000},
+        %{start_ms: 5_000, end_ms: 6_000}
+      ]
+
+      # marge de 350 ms avant et 450 ms après, sauf phrase voisine trop proche
+      assert Catalog.clip_bounds(segs, 0) == {650, 2_200}
+      assert Catalog.clip_bounds(segs, 1) == {2_000, 3_450}
+      assert Catalog.clip_bounds(segs, 2, 6_200) == {4_650, 6_200}
     end
 
     test "remplace les quotes existantes" do

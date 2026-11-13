@@ -43,23 +43,11 @@ defmodule QuotorWeb.Admin.BackupController do
 
     case Req.head(req, url: url) do
       {:ok, %Req.Response{status: 200}} ->
-        conn =
-          conn
-          |> put_resp_content_type("application/x-tar")
-          |> put_resp_header("content-disposition", ~s(attachment; filename="#{name}"))
-          |> send_chunked(200)
-
-        Req.get(req,
-          url: url,
-          into: fn {:data, data}, acc ->
-            case chunk(conn, data) do
-              {:ok, _conn} -> {:cont, acc}
-              {:error, _closed} -> {:halt, acc}
-            end
-          end
-        )
-
         conn
+        |> put_resp_content_type("application/x-tar")
+        |> put_resp_header("content-disposition", ~s(attachment; filename="#{name}"))
+        |> send_chunked(200)
+        |> QuotorWeb.DownloadController.stream_body(req, url)
 
       _ ->
         not_found(conn)

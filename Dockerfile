@@ -11,6 +11,20 @@
 
 ARG ELIXIR_IMAGE=elixir:1.19
 ARG RUNNER_IMAGE=debian:trixie-slim
+ARG WHISPER_VERSION=v1.9.5
+
+########## whisper.cpp (transcription vocale) ##########
+# Compilé à part, sans bibliothèques partagées : seul le binaire est copié.
+# GGML_NATIVE=OFF : binaire portable (AVX2), pas optimisé pour la machine de build.
+FROM ${RUNNER_IMAGE} AS whisper
+ARG WHISPER_VERSION
+RUN apt-get update -y \
+    && apt-get install -y --no-install-recommends build-essential cmake git ca-certificates \
+    && git clone --depth 1 --branch ${WHISPER_VERSION} https://github.com/ggml-org/whisper.cpp /src \
+    && cmake -S /src -B /build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+         -DGGML_NATIVE=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF \
+    && cmake --build /build -j "$(nproc)" --target whisper-cli \
+    && cp /build/bin/whisper-cli /usr/local/bin/whisper-cli
 
 ########## Build ##########
 FROM ${ELIXIR_IMAGE} AS builder
@@ -46,7 +60,7 @@ FROM ${RUNNER_IMAGE} AS runner
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends \
       libstdc++6 openssl libncurses6 locales ca-certificates curl tini \
-      ffmpeg python3 \
+      ffmpeg python3 libgomp1 \
       postgresql \
     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
@@ -56,10 +70,11 @@ RUN apt-get update -y \
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
 
 RUN useradd --create-home --uid 1000 quotor \
-    && mkdir -p /data /backups && chown quotor:quotor /data /backups
+    && mkdir -p /data/models /backups && chown -R quotor:quotor /data /backups
 
 WORKDIR /app
 COPY --from=builder --chown=quotor:quotor /app/_build/prod/rel/quotor ./
+COPY --from=whisper /usr/local/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY --chown=quotor:quotor --chmod=755 docker/entrypoint.sh /app/entrypoint.sh
 
 USER quotor

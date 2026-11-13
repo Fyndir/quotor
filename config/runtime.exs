@@ -103,6 +103,34 @@ if System.get_env("KEEP_SOURCES") in ~w(true 1) do
   config :quotor, :keep_sources, true
 end
 
+# Transcription vocale (whisper.cpp) : vérifie et recale les quotes tirées des
+# sous-titres, et crée celles des vidéos sans sous-titres.
+if config_env() != :test do
+  config :quotor, :transcription,
+    enabled:
+      (case System.get_env("TRANSCRIBE", "auto") do
+         v when v in ~w(true 1) -> true
+         v when v in ~w(false 0) -> false
+         "auto" -> :auto
+         other -> raise "TRANSCRIBE invalide : #{inspect(other)} (auto, true ou false)"
+       end),
+    min_score: System.get_env("TRANSCRIBE_MIN_SCORE", "0.75") |> Float.parse() |> elem(0)
+
+  config :quotor,
+         :whisper,
+         [
+           path: System.get_env("WHISPER_PATH", "whisper-cli"),
+           model: System.get_env("WHISPER_MODEL", "small"),
+           language: System.get_env("WHISPER_LANGUAGE", "fr"),
+           vad: System.get_env("WHISPER_VAD", "false") in ~w(true 1)
+         ] ++
+           if(t = System.get_env("WHISPER_THREADS"),
+             do: [threads: String.to_integer(t)],
+             else: []
+           ) ++
+           if(d = System.get_env("WHISPER_MODELS_DIR"), do: [models_dir: d], else: [])
+end
+
 legal =
   [
     editor_name: System.get_env("LEGAL_EDITOR_NAME"),

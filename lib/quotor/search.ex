@@ -98,7 +98,17 @@ defmodule Quotor.Search do
 
   @candidates 6
 
-  defp find_phrase(phrase_tokens, shuffle?) do
+  @doc """
+  Autre segment pour la même expression (`tokens`), pris dans un extrait
+  différent de ceux de `exclude` (identifiants de quotes). Sert au contrôle
+  à l'écoute des montages (`Quotor.Montages.Check`). Renvoie `nil` s'il n'y en
+  a pas.
+  """
+  def alternative(tokens, exclude) when is_list(exclude) do
+    find_phrase(tokens, false, exclude)
+  end
+
+  defp find_phrase(phrase_tokens, shuffle?, exclude \\ []) do
     phrase = Enum.join(phrase_tokens, " ")
 
     order =
@@ -108,6 +118,7 @@ defmodule Quotor.Search do
 
     Catalog.visible_quotes()
     |> where([quote: q], fragment("? @@ phraseto_tsquery('simple', ?)", q.tsv, ^phrase))
+    |> where([quote: q], q.id not in ^exclude)
     |> order_by(^[asc: order])
     |> limit(@candidates)
     |> select([quote: q, source: s], %{
@@ -147,7 +158,6 @@ defmodule Quotor.Search do
         to_ms = min(List.last(chunk).end_ms + 150, candidate.clip_end_ms)
 
         candidate
-        |> Map.drop([:clip_end_ms])
         |> Map.merge(%{from_ms: from_ms, to_ms: max(to_ms, from_ms + 200), text: phrase})
     end
   end

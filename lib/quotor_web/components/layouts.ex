@@ -52,6 +52,7 @@ defmodule QuotorWeb.Layouts do
         {:dashboard, ~p"/admin", "hero-chart-bar", "Supervision"},
         {:sources, ~p"/admin/sources", "hero-film", "Vidéos sources"},
         {:channels, ~p"/admin/chaines", "hero-tv", "Chaînes suivies"},
+        {:history, ~p"/admin/historique", "hero-clock", "Historique"},
         {:quotes, ~p"/admin/quotes", "hero-chat-bubble-bottom-center-text", "Quotes"},
         {:authors, ~p"/admin/auteurs", "hero-user-group", "Auteurs"},
         {:reports, ~p"/admin/signalements", "hero-flag", "Signalements"},

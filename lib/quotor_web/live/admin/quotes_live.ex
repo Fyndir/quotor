@@ -1,8 +1,12 @@
 defmodule QuotorWeb.Admin.QuotesLive do
-  @moduledoc "Modération des quotes : correction du texte, masquage."
+  @moduledoc """
+  Modération des quotes : correction du texte, masquage, et validation des
+  quotes « à vérifier » (texte et parole divergent, cf. transcription vocale).
+  """
   use QuotorWeb, :live_view
 
   alias Quotor.{Catalog, Media, Text}
+  alias Quotor.Catalog.Quote
 
   @impl true
   def render(assigns) do
@@ -26,6 +30,15 @@ defmodule QuotorWeb.Admin.QuotesLive do
           class="input input-sm flex-1"
         />
         <input :if={@source_id} type="hidden" name="source_id" value={@source_id} />
+        <input :if={@review?} type="hidden" name="review" value="1" />
+        <.link
+          id="review-filter"
+          patch={if @review?, do: ~p"/admin/quotes", else: ~p"/admin/quotes?review=1"}
+          class={["btn btn-sm", if(@review?, do: "btn-warning", else: "btn-ghost")]}
+        >
+          <.icon name="hero-exclamation-triangle" class="size-4" /> À vérifier
+          <span class="badge badge-sm">{@to_review}</span>
+        </.link>
         <.link :if={@source_id} patch={~p"/admin/quotes"} class="btn btn-sm btn-ghost">
           Source n° {@source_id} <.icon name="hero-x-mark" class="size-4" />
         </.link>
@@ -81,6 +94,19 @@ defmodule QuotorWeb.Admin.QuotesLive do
                   <.link navigate={~p"/q/#{quote.id}"} class="hover:underline">{quote.text}</.link>
                   <div class="text-xs text-base-content/50">
                     {Text.format_ms(quote.start_ms)} – {Text.format_ms(quote.end_ms)}
+                    <span
+                      :if={quote.asr_score}
+                      id={"asr-score-#{quote.id}"}
+                      class={[
+                        "badge badge-xs ml-2",
+                        if(Quote.needs_review?(quote), do: "badge-warning", else: "badge-success")
+                      ]}
+                      title="Accord entre le texte et la parole entendue (transcription vocale)"
+                    >
+                      {if Quote.needs_review?(quote), do: "à vérifier", else: "vérifiée"} · {round(
+                        quote.asr_score * 100
+                      )} %
+                    </span>
                   </div>
                 <% end %>
               </td>
@@ -111,6 +137,17 @@ defmodule QuotorWeb.Admin.QuotesLive do
               <td><.status_badge status={quote.status} /></td>
               <td>{quote.views_count}</td>
               <td class="text-right whitespace-nowrap">
+                <button
+                  :if={Quote.needs_review?(quote)}
+                  id={"review-quote-#{quote.id}"}
+                  type="button"
+                  phx-click="mark_reviewed"
+                  phx-value-id={quote.id}
+                  class="btn btn-xs btn-ghost text-success"
+                  title="Le texte correspond à ce qui est dit : valider et afficher"
+                >
+                  <.icon name="hero-check-circle" class="size-4" />
+                </button>
                 <button
                   type="button"
                   phx-click="edit"
@@ -165,14 +202,18 @@ defmodule QuotorWeb.Admin.QuotesLive do
 
     {:noreply,
      socket
-     |> assign(source_id: source_id, filter: to_form(%{"search" => search}))
+     |> assign(
+       source_id: source_id,
+       review?: params["review"] == "1",
+       filter: to_form(%{"search" => search})
+     )
      |> load()}
   end
 
   @impl true
   def handle_event("filter", params, socket) do
     query =
-      Map.take(params, ["search", "source_id"])
+      Map.take(params, ["search", "source_id", "review"])
       |> Enum.reject(fn {_, v} -> v in [nil, ""] end)
       |> Map.new()
 
@@ -190,8 +231,13 @@ defmodule QuotorWeb.Admin.QuotesLive do
     quote = Catalog.get_quote!(id)
 
     case Catalog.update_quote(quote, %{text: text}) do
-      {:ok, _} -> {:noreply, socket |> assign(editing: nil) |> load()}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Texte invalide.")}
+      {:ok, quote} ->
+        # corrigée par un admin : elle n'est plus « à vérifier »
+        if Quote.needs_review?(quote), do: Catalog.mark_quote_reviewed(quote)
+        {:noreply, socket |> assign(editing: nil) |> load()}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Texte invalide.")}
     end
   end
 
@@ -200,6 +246,11 @@ defmodule QuotorWeb.Admin.QuotesLive do
     author_id = if author_id == "", do: nil, else: author_id
     {:ok, _} = Catalog.update_quote(quote, %{author_id: author_id})
     {:noreply, socket |> put_flash(:info, "Auteur de la quote mis à jour.") |> load()}
+  end
+
+  def handle_event("mark_reviewed", %{"id" => id}, socket) do
+    {:ok, _} = id |> Catalog.get_quote!() |> Catalog.mark_quote_reviewed()
+    {:noreply, socket |> put_flash(:info, "Quote validée et affichée.") |> load()}
   end
 
   def handle_event("toggle", %{"id" => id}, socket) do
@@ -213,8 +264,10 @@ defmodule QuotorWeb.Admin.QuotesLive do
       quotes:
         Catalog.list_admin_quotes(
           search: socket.assigns.filter[:search].value,
-          source_id: socket.assigns.source_id
-        )
+          source_id: socket.assigns.source_id,
+          review: socket.assigns.review?
+        ),
+      to_review: Catalog.count_quotes_to_review()
     )
   end
 end

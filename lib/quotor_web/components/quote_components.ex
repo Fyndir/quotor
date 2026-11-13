@@ -116,6 +116,31 @@ defmodule QuotorWeb.QuoteComponents do
             {seg["text"]}
           </.link>
         </div>
+        <p
+          :if={@montage.asr_score}
+          id={"montage-#{@montage.key}-check"}
+          class={[
+            "text-sm flex items-center gap-1.5",
+            if(@montage.doubtful == [], do: "text-success", else: "text-warning")
+          ]}
+        >
+          <.icon
+            name={if @montage.doubtful == [], do: "hero-check-badge", else: "hero-speaker-wave"}
+            class="size-4"
+          />
+          <%= if @montage.doubtful == [] do %>
+            Vérifié à l'écoute : chaque mot est bien prononcé.
+          <% else %>
+            Vérifié à l'écoute ({round(@montage.asr_score * 100)} %) — peut-être mal rendu{if length(
+                                                                                                @montage.doubtful
+                                                                                              ) > 1,
+                                                                                              do: "s",
+                                                                                              else: ""} : {Enum.join(
+              @montage.doubtful,
+              ", "
+            )}
+          <% end %>
+        </p>
         <p :if={@montage.missing != []} class="text-sm text-warning">
           <.icon name="hero-exclamation-triangle-micro" class="size-4" />
           Introuvable{if length(@montage.missing) > 1, do: "s", else: ""} : {Enum.join(
@@ -124,6 +149,14 @@ defmodule QuotorWeb.QuoteComponents do
           )}
         </p>
         <div class="flex flex-wrap gap-2">
+          <a
+            id={"montage-#{@montage.key}-download"}
+            href={~p"/m/#{@montage.key}/telecharger"}
+            download
+            class="btn btn-sm btn-primary"
+          >
+            <.icon name="hero-arrow-down-tray" class="size-4" /> Télécharger
+          </a>
           <button
             id={"montage-#{@montage.key}-copy"}
             type="button"
@@ -163,6 +196,7 @@ defmodule QuotorWeb.QuoteComponents do
         "ready" -> "badge-success"
         "failed" -> "badge-error"
         "pending" -> "badge-ghost"
+        "review" -> "badge-warning"
         _ -> "badge-info"
       end
     ]}>
@@ -174,6 +208,9 @@ defmodule QuotorWeb.QuoteComponents do
   def status_label("pending"), do: "en attente"
   def status_label("downloading"), do: "téléchargement"
   def status_label("cutting"), do: "découpe"
+  def status_label("refining"), do: "affinage"
+  def status_label("cut"), do: "brut"
+  def status_label("review"), do: "à vérifier"
   def status_label("ready"), do: "prête"
   def status_label("failed"), do: "échec"
   def status_label(other), do: other

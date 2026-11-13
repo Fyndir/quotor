@@ -8,7 +8,7 @@ defmodule Quotor.Catalog do
   alias Quotor.Repo
   alias Quotor.Media
   alias Quotor.Accounts.Scope
-  alias Quotor.Catalog.{Author, Channel, Source, Quote, QuoteWord, Favorite, Report}
+  alias Quotor.Catalog.{Author, Channel, Source, Quote, QuoteWord, Favorite, Report, VideoHistory}
 
   @topic "catalog"
 
@@ -159,7 +159,11 @@ defmodule Quotor.Catalog do
   def change_youtube_source(attrs \\ %{}), do: Source.youtube_changeset(%Source{}, attrs)
 
   def create_youtube_source(attrs) do
-    %Source{} |> Source.youtube_changeset(attrs) |> Repo.insert() |> tap_broadcast()
+    %Source{}
+    |> Source.youtube_changeset(attrs)
+    |> Repo.insert()
+    |> tap(&record_history/1)
+    |> tap_broadcast()
   end
 
   def create_upload_source(attrs) do
@@ -167,17 +171,114 @@ defmodule Quotor.Catalog do
   end
 
   def update_source(%Source{} = source, attrs) do
-    source |> Source.update_changeset(attrs) |> Repo.update() |> tap_broadcast()
+    result = source |> Source.update_changeset(attrs) |> Repo.update()
+
+    case result do
+      {:ok, %Source{status: status} = updated} when status != source.status ->
+        history_status(updated, status)
+
+      _ ->
+        :ok
+    end
+
+    tap_broadcast(result)
   end
 
-  @doc "Supprime une source, ses quotes et tous les fichiers associés."
+  @doc """
+  Supprime une source, ses quotes et tous les fichiers associés. La vidéo reste
+  dans l'historique (`deleted`) : la synchronisation ne la réimportera pas.
+  """
   def delete_source(%Source{} = source) do
     Media.delete_prefix("clips/#{source.id}")
     Media.delete_prefix("thumbs/#{source.id}")
     Media.delete(source.file_path)
     Media.delete(source.subtitle_path)
+    history_status(source, "deleted")
     Repo.delete(source) |> tap_broadcast()
   end
+
+  ## Historique des vidéos analysées
+
+  # Nouvelle soumission (ou nouvelle soumission d'une vidéo supprimée).
+  defp record_history({:ok, %Source{youtube_id: yid} = s}) when is_binary(yid) do
+    now = DateTime.utc_now(:second)
+
+    Repo.insert!(
+      %VideoHistory{
+        youtube_id: yid,
+        title: s.title,
+        url: s.url,
+        status: "pending",
+        channel_id: s.channel_id,
+        source_id: s.id,
+        inserted_at: now,
+        updated_at: now
+      },
+      on_conflict: [
+        set: [source_id: s.id, status: "pending", removed_at: nil, updated_at: now]
+      ],
+      conflict_target: :youtube_id
+    )
+  end
+
+  defp record_history(_), do: :ok
+
+  defp history_status(%Source{youtube_id: yid} = s, status)
+       when is_binary(yid) and status in ~w(ready failed deleted) do
+    now = DateTime.utc_now(:second)
+
+    changes =
+      [status: status, updated_at: now] ++
+        case status do
+          "ready" -> [analyzed_at: now, title: s.title]
+          "deleted" -> [removed_at: now, title: s.title]
+          _ -> [title: s.title]
+        end
+
+    from(h in VideoHistory, where: h.youtube_id == ^yid) |> Repo.update_all(set: changes)
+    :ok
+  end
+
+  defp history_status(_, _), do: :ok
+
+  @doc "La vidéo YouTube a-t-elle déjà été soumise (même supprimée depuis) ?"
+  def known_video?(youtube_id) do
+    Repo.exists?(from h in VideoHistory, where: h.youtube_id == ^youtube_id) or
+      Repo.exists?(from s in Source, where: s.youtube_id == ^youtube_id)
+  end
+
+  def get_video_history(youtube_id), do: Repo.get_by(VideoHistory, youtube_id: youtube_id)
+
+  @doc "Historique, du plus récent au plus ancien. Options : `:search`, `:status`, `:limit`."
+  def list_video_history(opts \\ []) do
+    search = Keyword.get(opts, :search, "")
+    status = Keyword.get(opts, :status)
+
+    VideoHistory
+    |> then(fn q ->
+      if search in [nil, ""],
+        do: q,
+        else: where(q, [h], ilike(h.title, ^"%#{search}%") or h.youtube_id == ^search)
+    end)
+    |> then(fn q -> if status in [nil, ""], do: q, else: where(q, [h], h.status == ^status) end)
+    |> order_by([h], desc: h.updated_at, desc: h.id)
+    |> limit(^Keyword.get(opts, :limit, 200))
+    |> preload(:channel)
+    |> Repo.all()
+  end
+
+  def count_video_history_by_status do
+    from(h in VideoHistory, group_by: h.status, select: {h.status, count(h.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
+  Retire une vidéo **supprimée** de l'historique : la prochaine synchronisation
+  de sa chaîne pourra la réimporter.
+  """
+  def forget_video(%VideoHistory{status: "deleted"} = h), do: Repo.delete(h)
+  def forget_video(%VideoHistory{}), do: {:error, :still_in_catalog}
 
   def count_sources_by_status do
     from(s in Source, group_by: s.status, select: {s.status, count(s.id)})
@@ -278,6 +379,8 @@ defmodule Quotor.Catalog do
   def list_admin_quotes(opts \\ []) do
     search = Keyword.get(opts, :search)
     source_id = Keyword.get(opts, :source_id)
+    review? = Keyword.get(opts, :review, false)
+    threshold = Quote.review_threshold()
 
     Quote
     |> then(fn q ->
@@ -286,6 +389,11 @@ defmodule Quotor.Catalog do
         else: where(q, [q], ilike(q.norm, ^"%#{Quotor.Text.normalize(search)}%"))
     end)
     |> then(fn q -> if source_id, do: where(q, [q], q.source_id == ^source_id), else: q end)
+    |> then(fn q ->
+      if review?,
+        do: where(q, [q], q.asr_score < ^threshold or q.status == "review"),
+        else: q
+    end)
     |> order_by([q], desc: q.id)
     |> limit(^Keyword.get(opts, :limit, 100))
     |> preload([:author, source: :author])
@@ -305,12 +413,54 @@ defmodule Quotor.Catalog do
   def update_quote_media(%Quote{} = q, attrs),
     do: q |> Quote.media_changeset(attrs) |> Repo.update()
 
+  @doc "Validation par un admin d'une quote « à vérifier » : elle est rendue visible."
+  def mark_quote_reviewed(%Quote{} = q) do
+    # une quote écartée à l'affinage (« review ») est publiée si son clip existe
+    status = if q.status in ["review", "cut"] and q.clip_path, do: "ready", else: q.status
+
+    q
+    |> Ecto.Changeset.change(asr_score: 1.0, enabled: true, status: status)
+    |> Repo.update()
+  end
+
+  @doc "Nombre de quotes à vérifier (texte et parole divergent)."
+  def count_quotes_to_review do
+    threshold = Quote.review_threshold()
+
+    Repo.aggregate(
+      from(q in Quote, where: q.asr_score < ^threshold or q.status == "review"),
+      :count
+    )
+  end
+
   def increment_views(quote_id) do
     from(q in Quote, where: q.id == ^quote_id) |> Repo.update_all(inc: [views_count: 1])
   end
 
-  @padding_before 120
-  @padding_after 250
+  # Marges autour de la phrase : larges, pour ne pas couper le premier ou le
+  # dernier mot (l'affinage les vérifie ensuite, cf. Quotor.Ingest.Refine).
+  @padding_before 350
+  @padding_after 450
+
+  @doc """
+  Bornes du clip du segment `i` : la phrase plus une marge de chaque côté, sans
+  empiéter sur la phrase précédente ni sur la suivante.
+  """
+  def clip_bounds(segments, i, max_end \\ :infinity) do
+    seg = Enum.at(segments, i)
+    prev = if i > 0, do: Enum.at(segments, i - 1)
+    nxt = Enum.at(segments, i + 1)
+
+    floor = if prev, do: min(prev.end_ms, seg.start_ms), else: 0
+    ceiling = if nxt, do: max(nxt.start_ms, seg.end_ms), else: max_end
+
+    clip_start = max(max(seg.start_ms - @padding_before, floor), 0)
+    clip_end = seg.end_ms + @padding_after
+    clip_end = if ceiling == :infinity, do: clip_end, else: min(clip_end, ceiling)
+    clip_end = if max_end == :infinity, do: clip_end, else: min(clip_end, max_end)
+
+    {clip_start, max(clip_end, seg.start_ms + 300)}
+  end
 
   @doc """
   Remplace toutes les quotes d'une source par les segments fournis
@@ -323,9 +473,10 @@ defmodule Quotor.Catalog do
     Repo.transaction(fn ->
       Repo.delete_all(from q in Quote, where: q.source_id == ^source.id)
 
-      Enum.each(segments, fn seg ->
-        clip_end = seg.end_ms + @padding_after
-        clip_end = if max_end == :infinity, do: clip_end, else: min(clip_end, max_end)
+      segments
+      |> Enum.with_index()
+      |> Enum.each(fn {seg, i} ->
+        {clip_start, clip_end} = clip_bounds(segments, i, max_end)
 
         quote =
           Repo.insert!(%Quote{
@@ -334,8 +485,10 @@ defmodule Quotor.Catalog do
             norm: seg.norm,
             start_ms: seg.start_ms,
             end_ms: seg.end_ms,
-            clip_start_ms: max(seg.start_ms - @padding_before, 0),
-            clip_end_ms: max(clip_end, seg.start_ms + 300),
+            clip_start_ms: clip_start,
+            clip_end_ms: clip_end,
+            asr_score: seg[:asr_score],
+            enabled: Map.get(seg, :enabled, true),
             status: "pending",
             inserted_at: now,
             updated_at: now

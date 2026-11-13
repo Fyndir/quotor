@@ -35,6 +35,7 @@ services:
       - .:/app
       - media:/data/media
       - backups:/data/backups
+      - whisper_models:/data/models
       - deps:/app/deps
       - build:/app/_build
       - mix_home:/root/.mix
@@ -50,6 +51,9 @@ volumes:
     name: quotor_media
   backups:
     name: quotor_backups
+  # modèles whisper.cpp, téléchargés au premier usage (~500 Mo pour « small »)
+  whisper_models:
+    name: quotor_whisper_models
   deps:
   build:
   mix_home:

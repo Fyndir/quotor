@@ -111,6 +111,9 @@ config :quotor, Oban,
 # media: :auto inclut les médias s'ils sont sur disque local (pas en S3/R2).
 config :quotor, :backup, enabled: true, keep: 7, media: :auto
 
+# Transcription vocale (whisper.cpp) : :auto = active si whisper-cli est installé
+config :quotor, :transcription, enabled: :auto, min_score: 0.75
+
 # Auteur et titulaire des droits sur le logiciel Quotor (code, concept, design)
 config :quotor, :owner, name: "Antoine Gamain", since: 2026
 

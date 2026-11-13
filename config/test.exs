@@ -52,3 +52,7 @@ config :quotor, :downloader, Quotor.FakeDownloader
 
 # Sauvegardes de test dans un dossier temporaire dédié
 config :quotor, :backup, dir: Path.join(System.tmp_dir!(), "quotor_test_backups")
+
+# Transcription vocale factice, désactivée sauf dans les tests qui l'activent
+config :quotor, :transcriber, Quotor.FakeTranscriber
+config :quotor, :transcription, enabled: false, min_score: 0.75

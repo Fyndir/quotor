@@ -23,6 +23,9 @@ defmodule QuotorWeb.Router do
   scope "/", QuotorWeb do
     get "/health", HealthController, :show
     get "/media/*path", MediaController, :show
+    # téléchargement en pièce jointe (montage, extrait)
+    get "/m/:key/telecharger", DownloadController, :montage
+    get "/q/:id/telecharger", DownloadController, :quote
   end
 
   ## Public (anonyme, utilisateur, admin)
@@ -75,6 +78,7 @@ defmodule QuotorWeb.Router do
       live "/utilisateurs", UsersLive, :index
       live "/logs", LogsLive, :index
       live "/sauvegardes", BackupsLive, :index
+      live "/historique", HistoryLive, :index
     end
 
     # Téléchargement d'une archive de sauvegarde (admin uniquement)

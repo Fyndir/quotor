@@ -8,7 +8,7 @@ defmodule QuotorWeb.HomeLive do
   """
   use QuotorWeb, :live_view
 
-  alias Quotor.{Catalog, Montages, RateLimit, Search}
+  alias Quotor.{Catalog, Montages, RateLimit, Search, Suggestions}
   alias Quotor.Accounts.Scope
 
   @page_size 24
@@ -100,11 +100,18 @@ defmodule QuotorWeb.HomeLive do
         </div>
       </section>
 
+      <%!-- Idées de phrases (mode avancé) --%>
+      <.ideas
+        :if={@mode == "advanced" and @query == ""}
+        ideas={@ideas}
+        title="En manque d'idée ? Essaie :"
+      />
+
       <%!-- Mode avancé --%>
       <section :if={@mode == "advanced" and @query != ""} class="mx-auto max-w-3xl mb-10">
         <div :if={@montage_loading} class="rounded-2xl bg-base-200 p-10 text-center">
           <span class="loading loading-dots loading-lg text-primary"></span>
-          <p class="mt-3 text-base-content/70">Montage en cours…</p>
+          <p class="mt-3 text-base-content/70">Montage en cours, puis vérification à l’écoute…</p>
         </div>
         <div :if={!@montage_loading and @montage}>
           <.montage_player montage={@montage} />
@@ -120,6 +127,9 @@ defmodule QuotorWeb.HomeLive do
         >
           <.icon name="hero-face-frown" class="size-8 mb-2" />
           <p>{@montage_error}</p>
+        </div>
+        <div :if={!@montage_loading} class="mt-8">
+          <.ideas ideas={Enum.take(@ideas, 3)} title="Une autre idée ?" />
         </div>
       </section>
 
@@ -183,6 +193,36 @@ defmodule QuotorWeb.HomeLive do
     """
   end
 
+  attr :ideas, :list, required: true
+  attr :title, :string, required: true
+
+  # Idées de phrases montables (cf. Quotor.Suggestions) : un clic lance le montage.
+  defp ideas(assigns) do
+    ~H"""
+    <section :if={@ideas != []} id="ideas" class="mx-auto max-w-3xl mb-10">
+      <div class="flex items-center justify-between gap-2 mb-3">
+        <h2 class="text-sm font-semibold text-base-content/70 flex items-center gap-1.5">
+          <.icon name="hero-light-bulb" class="size-4" /> {@title}
+        </h2>
+        <button id="more-ideas" type="button" phx-click="more_ideas" class="btn btn-ghost btn-xs">
+          <.icon name="hero-arrow-path" class="size-3.5" /> Autres idées
+        </button>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <.link
+          :for={{idea, i} <- Enum.with_index(@ideas)}
+          id={"idea-#{i}"}
+          patch={~p"/?#{%{q: idea, mode: "advanced"}}"}
+          class="segment-chip rounded-full bg-base-200 hover:bg-primary hover:text-primary-content px-4 py-2 text-sm transition-colors"
+          style={"animation-delay: #{i * 50}ms"}
+        >
+          « {idea} »
+        </.link>
+      </div>
+    </section>
+    """
+  end
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -199,6 +239,7 @@ defmodule QuotorWeb.HomeLive do
        montage_loading: false,
        montage_error: nil,
        authors_found: [],
+       ideas: [],
        form: to_form(%{"q" => ""})
      )
      |> stream(:quotes, [])
@@ -219,7 +260,13 @@ defmodule QuotorWeb.HomeLive do
   end
 
   defp run(%{assigns: %{query: ""}} = socket) do
+    ideas =
+      if socket.assigns.mode == "advanced" and connected?(socket),
+        do: Suggestions.random(),
+        else: []
+
     socket
+    |> assign(ideas: ideas)
     |> assign(has_more: false, montage: nil, montage_loading: false)
     |> stream(:quotes, [], reset: true)
   end
@@ -240,6 +287,8 @@ defmodule QuotorWeb.HomeLive do
   end
 
   defp run(%{assigns: %{mode: "advanced"}} = socket) do
+    socket = if connected?(socket), do: assign(socket, ideas: Suggestions.random()), else: socket
+
     if connected?(socket),
       do: start_montage(socket, false),
       else: assign(socket, montage_loading: true)
@@ -313,6 +362,10 @@ defmodule QuotorWeb.HomeLive do
 
   def handle_event("remix", _params, socket) do
     {:noreply, start_montage(socket, true)}
+  end
+
+  def handle_event("more_ideas", _params, socket) do
+    {:noreply, assign(socket, ideas: Suggestions.random())}
   end
 
   def handle_event("more", _params, socket) do

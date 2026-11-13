@@ -13,5 +13,6 @@ defmodule Quotor.Workers.IngestSource do
   def perform(%Oban.Job{args: %{"source_id" => id}}), do: Quotor.Ingest.process(id)
 
   @impl Oban.Worker
-  def timeout(_job), do: :timer.minutes(30)
+  # transcription vocale comprise (whisper.cpp, sur CPU)
+  def timeout(_job), do: :timer.minutes(80)
 end
